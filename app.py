@@ -1,278 +1,514 @@
-import os
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+import requests
+import plotly.graph_objects as go
 from datetime import datetime, timezone
 
-import numpy as np
-import pandas as pd
-import requests
-import streamlit as st
-
-st.set_page_config(page_title="XAU/USD Signal Lab", page_icon="📈", layout="wide")
-
-st.title("XAU/USD Signal Lab")
-st.caption("İlk prototip • Karar destek sistemi • Otomatik emir göndermez")
-
-st.warning(
-    "Bu prototip yatırım tavsiyesi değildir. Demo modu sentetik veri kullanır; "
-    "gerçek veriyle çalışırken bile sinyalleri sanal işlem ve geçmiş testlerle doğrulayın."
+# --------------------------------------------------
+# SAYFA AYARLARI
+# --------------------------------------------------
+st.set_page_config(
+    page_title="XAU/USD Trading Dashboard",
+    page_icon="📈",
+    layout="wide"
 )
 
+st.title("📈 XAU/USD Trading Dashboard")
+st.caption("Altın / ABD Doları • Teknik analiz ve sanal sinyal takibi")
 
+st.warning(
+    "Bu uygulama eğitim ve analiz amaçlıdır. "
+    "Sinyaller yatırım tavsiyesi değildir. "
+    "Gerçek işlem yapmadan önce sanal test ve geçmiş veri testi yapın."
+)
+
+# --------------------------------------------------
+# VERİ KAYNAĞI VE AYARLAR
+# --------------------------------------------------
 with st.sidebar:
     st.header("Veri kaynağı")
 
-    if "calisma_modu" not in st.session_state:
-        st.session_state["calisma_modu"] = "Demo veri"
-
     mode = st.radio(
         "Çalışma modu",
-        ["Demo veri", "Twelve Data API"],
-        index=["Demo veri", "Twelve Data API"].index(
-            st.session_state["calisma_modu"]
-        ),
+        ["Twelve Data API", "Demo veri"],
+        index=0,
         key="calisma_modu"
     )
 
-    
+    interval = st.selectbox(
+        "Mum aralığı",
+        ["1h", "4h", "1day"],
+        index=1,
+        key="mum_araligi"
+    )
 
-mode = st.radio(
-    "Çalışma modu",
-    ["Demo veri", "Twelve Data API"],
-    index=["Demo veri", "Twelve Data API"].index(
-        st.session_state["calisma_modu"]
-    ),
-    key="calisma_modu"
-)
-    api_key = st.secrets.get("TWELVE_DATA_API_KEY", "")
-    if mode == "Twelve Data API":
-        api_key = st.text_input(
-    "Twelve Data API anahtarı",
-    value=api_key,
-    type="password"
-)
-        st.caption("Anahtar bu oturumda kullanılır; koda yazmayın veya paylaşmayın.")
     st.divider()
-    st.header("Sinyal ayarları")
-    rsi_period = st.slider("RSI periyodu", 7, 21, 14)
-    ema_fast = st.slider("Hızlı EMA", 5, 30, 20)
-    ema_slow = st.slider("Yavaş EMA", 20, 100, 50)
-    buy_threshold = st.slider("AL eşiği", 10, 60, 30)
-    strong_threshold = st.slider("GÜÇLÜ AL eşiği", 50, 95, 75)
-    st.caption("Bu eşikler başlangıç varsayımlarıdır; optimize edilmiş veya kârlılığı kanıtlanmış değildir.")
+    st.header("Analiz ayarları")
 
-def demo_data(n=600, seed=7):
-    rng = np.random.default_rng(seed)
-    idx = pd.date_range(end=pd.Timestamp.now(tz="UTC").floor("h"), periods=n, freq="h")
-    drift = np.linspace(0, 90, n) + 22 * np.sin(np.linspace(0, 14, n))
-    returns = rng.normal(0.00005, 0.0038, n)
-    close = 2300 + drift + np.cumsum(returns * 2300)
-    close = close - close[0] + 2300 + drift
-    open_ = np.r_[close[0], close[:-1]]
-    spread = rng.uniform(1.0, 8.0, n)
-    high = np.maximum(open_, close) + spread
-    low = np.minimum(open_, close) - spread
-    volume = rng.integers(100, 1000, n)
-    return pd.DataFrame({"datetime": idx, "open": open_, "high": high, "low": low, "close": close, "volume": volume}).set_index("datetime")
+    rsi_period = st.slider(
+        "RSI periyodu",
+        min_value=7,
+        max_value=21,
+        value=14
+    )
 
-def fetch_twelvedata(symbol, interval, outputsize, key):
+    ema_fast = st.selectbox(
+        "Hızlı EMA",
+        [9, 12, 20],
+        index=0
+    )
+
+    ema_slow = st.selectbox(
+        "Yavaş EMA",
+        [21, 26, 50],
+        index=1
+    )
+
+    st.caption("API anahtarı Streamlit Secrets üzerinden okunur.")
+
+# --------------------------------------------------
+# VERİ ÇEKME
+# --------------------------------------------------
+@st.cache_data(ttl=60)
+def get_live_data(api_key, interval):
     url = "https://api.twelvedata.com/time_series"
+
     params = {
-        "symbol": symbol,
+        "symbol": "XAU/USD",
         "interval": interval,
-        "outputsize": outputsize,
-        "apikey": key,
-        "timezone": "UTC",
-        "format": "JSON",
+        "outputsize": 200,
+        "apikey": api_key,
+        "format": "JSON"
     }
-    response = requests.get(url, params=params, timeout=20)
+
+    response = requests.get(
+        url,
+        params=params,
+        timeout=20
+    )
     response.raise_for_status()
-    payload = response.json()
-    if payload.get("status") == "error" or "values" not in payload:
-        raise ValueError(payload.get("message", "API yanıtında mum verisi bulunamadı."))
-    df = pd.DataFrame(payload["values"])
-    df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
-    for col in ["open", "high", "low", "close", "volume"]:
-        if col in df:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-        elif col == "volume":
-            df[col] = np.nan
-    return df.sort_values("datetime").dropna(subset=["open", "high", "low", "close"]).set_index("datetime")
+    result = response.json()
 
-def add_indicators(df, rsi_period, ema_fast, ema_slow):
-    x = df.copy()
-    close = x["close"]
-    x["ema_fast"] = close.ewm(span=ema_fast, adjust=False).mean()
-    x["ema_slow"] = close.ewm(span=ema_slow, adjust=False).mean()
-    x["ema_200"] = close.ewm(span=200, adjust=False).mean()
+    if "values" not in result:
+        message = result.get(
+            "message",
+            result.get("code", "Bilinmeyen API hatası")
+        )
+        raise ValueError(str(message))
+
+    data = pd.DataFrame(result["values"])
+
+    if data.empty:
+        raise ValueError("API boş veri döndürdü.")
+
+    data["datetime"] = pd.to_datetime(
+        data["datetime"],
+        utc=True,
+        errors="coerce"
+    )
+
+    for col in ["open", "high", "low", "close"]:
+        data[col] = pd.to_numeric(
+            data[col],
+            errors="coerce"
+        )
+
+    if "volume" in data.columns:
+        data["volume"] = pd.to_numeric(
+            data["volume"],
+            errors="coerce"
+        )
+
+    data = data.dropna(
+        subset=["datetime", "open", "high", "low", "close"]
+    )
+
+    data = data.sort_values("datetime")
+    data = data.drop_duplicates("datetime")
+    data = data.set_index("datetime")
+
+    if len(data) < 55:
+        raise ValueError(
+            "Analiz için yeterli mum verisi gelmedi."
+        )
+
+    return data
+
+
+def get_demo_data(interval):
+    seed = 42
+    rng = np.random.default_rng(seed)
+
+    periods = 250
+
+    if interval == "1h":
+        freq = "h"
+    elif interval == "4h":
+        freq = "4h"
+    else:
+        freq = "D"
+
+    end = pd.Timestamp.now(tz="UTC").floor("h")
+    dates = pd.date_range(
+        end=end,
+        periods=periods,
+        freq=freq
+    )
+
+    changes = rng.normal(0, 8, periods)
+    close = 2300 + np.cumsum(changes)
+    open_price = np.r_[close[0], close[:-1]]
+
+    high = np.maximum(open_price, close) + rng.uniform(
+        1, 8, periods
+    )
+    low = np.minimum(open_price, close) - rng.uniform(
+        1, 8, periods
+    )
+
+    data = pd.DataFrame(
+        {
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "close": close
+        },
+        index=dates
+    )
+
+    return data
+
+
+# --------------------------------------------------
+# TEKNİK GÖSTERGELER
+# --------------------------------------------------
+def add_indicators(data, rsi_period, ema_fast, ema_slow):
+    data = data.copy()
+
+    close = data["close"]
+    high = data["high"]
+    low = data["low"]
+
+    data["EMA_fast"] = close.ewm(
+        span=ema_fast,
+        adjust=False
+    ).mean()
+
+    data["EMA_slow"] = close.ewm(
+        span=ema_slow,
+        adjust=False
+    ).mean()
+
     delta = close.diff()
-    gain = delta.clip(lower=0).ewm(alpha=1/rsi_period, adjust=False).mean()
-    loss = (-delta.clip(upper=0)).ewm(alpha=1/rsi_period, adjust=False).mean()
-    rs = gain / loss.replace(0, np.nan)
-    x["rsi"] = 100 - (100 / (1 + rs))
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
-    x["macd"] = ema12 - ema26
-    x["macd_signal"] = x["macd"].ewm(span=9, adjust=False).mean()
-    prev_close = close.shift(1)
-    tr = pd.concat([
-        x["high"] - x["low"],
-        (x["high"] - prev_close).abs(),
-        (x["low"] - prev_close).abs(),
-    ], axis=1).max(axis=1)
-    x["atr"] = tr.rolling(14).mean()
-    x["bb_mid"] = close.rolling(20).mean()
-    std = close.rolling(20).std()
-    x["bb_upper"] = x["bb_mid"] + 2 * std
-    x["bb_lower"] = x["bb_mid"] - 2 * std
-    return x
 
-def score_signal(df):
-    row = df.iloc[-1]
-    prev = df.iloc[-2]
-    score = 0
-    reasons = []
-    if pd.notna(row["ema_fast"]) and pd.notna(row["ema_slow"]):
-        if row["ema_fast"] > row["ema_slow"]:
-            score += 25
-            reasons.append("Hızlı EMA, yavaş EMA'nın üzerinde: kısa vadeli trend lehine.")
-        else:
-            score -= 25
-            reasons.append("Hızlı EMA, yavaş EMA'nın altında: kısa vadeli trend aleyhine.")
-    if pd.notna(row["ema_200"]):
-        if row["close"] > row["ema_200"]:
-            score += 15
-            reasons.append("Fiyat EMA 200 üzerinde.")
-        else:
-            score -= 15
-            reasons.append("Fiyat EMA 200 altında.")
-    if pd.notna(row["rsi"]):
-        if 52 <= row["rsi"] <= 68:
-            score += 15
-            reasons.append(f"RSI {row['rsi']:.1f}: momentum yükselişi destekliyor, aşırı alım bölgesinde değil.")
-        elif row["rsi"] < 45:
-            score -= 15
-            reasons.append(f"RSI {row['rsi']:.1f}: momentum zayıf.")
-        elif row["rsi"] > 75:
-            score -= 5
-            reasons.append(f"RSI {row['rsi']:.1f}: momentum güçlü olsa da aşırı uzama riski var.")
-        else:
-            reasons.append(f"RSI {row['rsi']:.1f}: tek başına belirgin yön teyidi vermiyor.")
-    if pd.notna(row["macd"]) and pd.notna(row["macd_signal"]):
-        if row["macd"] > row["macd_signal"] and row["macd"] >= prev["macd"]:
-            score += 15
-            reasons.append("MACD sinyal çizgisinin üzerinde ve momentum artıyor.")
-        elif row["macd"] < row["macd_signal"] and row["macd"] <= prev["macd"]:
-            score -= 15
-            reasons.append("MACD sinyal çizgisinin altında ve momentum zayıflıyor.")
-    if pd.notna(row["bb_mid"]):
-        if row["close"] > row["bb_mid"]:
-            score += 10
-            reasons.append("Kapanış Bollinger orta bandının üzerinde.")
-        else:
-            score -= 10
-            reasons.append("Kapanış Bollinger orta bandının altında.")
-    # Score is intentionally technical-only in v1. No macro/news score until reliable feeds are connected.
-    score = int(np.clip(score, -100, 100))
-    if score >= 75:
-        signal = "GÜÇLÜ AL"
-    elif score >= 30:
-        signal = "AL"
-    elif score <= -75:
-        signal = "GÜÇLÜ SAT"
-    elif score <= -30:
-        signal = "SAT"
-    else:
-        signal = "BEKLE"
-    return score, signal, reasons
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
 
-try:
-    if mode == "Demo veri":
-        data = demo_data()
-        source_label = "Sentetik demo veri — canlı fiyat değildir"
-    elif not api_key:
-        st.info("Canlı veriyi almak için sol menüye Twelve Data API anahtarını gir. İstersen demo modunda arayüzü inceleyebilirsin.")
+    avg_gain = gain.ewm(
+        alpha=1 / rsi_period,
+        min_periods=rsi_period,
+        adjust=False
+    ).mean()
+
+    avg_loss = loss.ewm(
+        alpha=1 / rsi_period,
+        min_periods=rsi_period,
+        adjust=False
+    ).mean()
+
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    data["RSI"] = 100 - (100 / (1 + rs))
+
+    data["RSI"] = data["RSI"].fillna(50)
+
+    previous_close = close.shift(1)
+
+    true_range = pd.concat(
+        [
+            high - low,
+            (high - previous_close).abs(),
+            (low - previous_close).abs()
+        ],
+        axis=1
+    ).max(axis=1)
+
+    data["ATR"] = true_range.rolling(14).mean()
+
+    data["Volume"] = (
+        data["volume"]
+        if "volume" in data.columns
+        else np.nan
+    )
+
+    return data
+
+
+# --------------------------------------------------
+# VERİYİ YÜKLE
+# --------------------------------------------------
+data = None
+data_error = None
+
+if mode == "Twelve Data API":
+    api_key = st.secrets.get("TWELVE_DATA_API_KEY", "")
+
+    if not api_key:
+        st.error(
+            "API anahtarı bulunamadı. "
+            "Streamlit uygulamasının Secrets bölümünü kontrol et."
+        )
         st.stop()
-    else:
-        interval = st.selectbox("Mum aralığı", ["1h", "4h", "1day"], index=1)
-        data = fetch_twelvedata("XAU/USD", interval, 500, api_key)
-        source_label = f"Twelve Data • XAU/USD • {interval}"
-except Exception as exc:
-    st.error(f"Veri alınamadı: {exc}")
+
+    try:
+        with st.spinner("Gerçek piyasa verisi alınıyor..."):
+            data = get_live_data(api_key, interval)
+
+    except Exception as exc:
+        st.error(f"Veri alınamadı: {exc}")
+        st.info(
+            "API limitini, XAU/USD sembolünü ve Secrets ayarını kontrol et."
+        )
+        st.stop()
+
+else:
+    data = get_demo_data(interval)
+    st.info(
+        "Demo modu açık. Bu fiyatlar gerçek piyasa verisi değildir."
+    )
+
+# --------------------------------------------------
+# VERİ KONTROLÜ
+# --------------------------------------------------
+if data is None or data.empty:
+    st.error("Gösterilecek veri bulunamadı.")
     st.stop()
 
-if len(data) < 210:
-    st.warning("EMA 200 ve anlamlı testler için daha fazla geçmiş veri gerekebilir.")
-
-data = add_indicators(data, rsi_period, ema_fast, ema_slow)
-score, signal, reasons = score_signal(data)
-last = data.iloc[-1]
 last_time = data.index[-1]
 now_utc = pd.Timestamp.now(tz="UTC")
-last_time_utc = pd.Timestamp(last_time)
 
-if last_time_utc.tzinfo is None:
-    last_time_utc = last_time_utc.tz_localize("UTC")
+if last_time.tzinfo is None:
+    last_time = last_time.tz_localize("UTC")
 else:
-    last_time_utc = last_time_utc.tz_convert("UTC")
+    last_time = last_time.tz_convert("UTC")
 
-age_hours = (now_utc - last_time_utc).total_seconds() / 3600
+age_hours = (
+    now_utc - last_time
+).total_seconds() / 3600
 
-interval = st.session_state.get("interval", "4h")
-max_age = {"1h": 3, "4h": 6, "1day": 36}.get(interval, 6)
+max_age = {
+    "1h": 3,
+    "4h": 6,
+    "1day": 36
+}[interval]
 
 if mode == "Twelve Data API":
     if age_hours < 0:
-        st.error("Veri zamanı geçersiz: zaman damgası gelecekte.")
+        st.error("Veri zaman damgası gelecekte görünüyor.")
     elif age_hours > max_age:
         st.error(
             f"VERİ ESKİ: Son mum {age_hours:.1f} saat önce. "
-            "Bu veriye dayanarak sinyal değerlendirme."
+            "Sinyali güvenilir kabul etme."
         )
     else:
         st.success(
-            f"Veri zamanı kontrolü geçti • Son mum {age_hours:.1f} saat önce"
+            f"Veri güncellik kontrolü geçti • "
+            f"Son mum {age_hours:.1f} saat önce"
         )
-st.caption(f"Veri kaynağı: {source_label} • Son mum zamanı: {last_time.strftime('%Y-%m-%d %H:%M UTC')}")
-if mode == "Demo veri":
-    st.warning("Demo modundasın. Aşağıdaki fiyatlar ve sinyal sentetiktir; işlem kararı için kullanma.")
 
+# --------------------------------------------------
+# ANALİZ
+# --------------------------------------------------
+data = add_indicators(
+    data,
+    rsi_period,
+    ema_fast,
+    ema_slow
+)
+
+last = data.iloc[-1]
+previous = data.iloc[-2]
+
+price = float(last["close"])
+rsi = float(last["RSI"])
+atr = last["ATR"]
+ema_f = float(last["EMA_fast"])
+ema_s = float(last["EMA_slow"])
+
+score = 0
+
+if ema_f > ema_s:
+    score += 1
+elif ema_f < ema_s:
+    score -= 1
+
+if price > ema_f:
+    score += 1
+elif price < ema_f:
+    score -= 1
+
+if rsi < 30:
+    score += 1
+elif rsi > 70:
+    score -= 1
+
+if score >= 2:
+    signal = "AL eğilimi"
+elif score <= -2:
+    signal = "SAT eğilimi"
+else:
+    signal = "NÖTR"
+
+# --------------------------------------------------
+# ÖZET KUTULARI
+# --------------------------------------------------
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Son kapanış", f"{last['close']:,.2f}")
-c2.metric("Teknik puan", f"{score:+d}/100")
-c3.metric("Sinyal", signal)
-c4.metric("RSI", f"{last['rsi']:.1f}" if pd.notna(last["rsi"]) else "—")
 
-st.subheader("XAU/USD fiyatı ve EMA'lar")
-chart = data[["close", "ema_fast", "ema_slow", "ema_200"]].tail(250)
-st.line_chart(chart, height=360)
+c1.metric(
+    "Son kapanış",
+    f"${price:,.2f}",
+    f"{price - float(previous['close']):+.2f}"
+)
 
-left, right = st.columns([1, 1])
+c2.metric(
+    "RSI",
+    f"{rsi:.1f}"
+)
+
+c3.metric(
+    "Sinyal puanı",
+    f"{score:+d} / 3"
+)
+
+c4.metric(
+    "Teknik görünüm",
+    signal
+)
+
+st.caption(
+    f"Veri kaynağı: {mode} • "
+    f"Mum aralığı: {interval} • "
+    f"Son mum: {last_time.strftime('%Y-%m-%d %H:%M UTC')}"
+)
+
+# --------------------------------------------------
+# GRAFİK
+# --------------------------------------------------
+st.subheader("XAU/USD Mum Grafiği")
+
+fig = go.Figure()
+
+fig.add_trace(
+    go.Candlestick(
+        x=data.index,
+        open=data["open"],
+        high=data["high"],
+        low=data["low"],
+        close=data["close"],
+        name="XAU/USD"
+    )
+)
+
+fig.add_trace(
+    go.Scatter(
+        x=data.index,
+        y=data["EMA_fast"],
+        mode="lines",
+        name=f"EMA {ema_fast}"
+    )
+)
+
+fig.add_trace(
+    go.Scatter(
+        x=data.index,
+        y=data["EMA_slow"],
+        mode="lines",
+        name=f"EMA {ema_slow}"
+    )
+)
+
+fig.update_layout(
+    height=600,
+    xaxis_rangeslider_visible=False,
+    template="plotly_dark",
+    margin=dict(l=10, r=10, t=30, b=10),
+    legend=dict(orientation="h")
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+# --------------------------------------------------
+# RSI VE ATR
+# --------------------------------------------------
+left, right = st.columns(2)
+
 with left:
-    st.subheader("Sinyal gerekçeleri")
-    for reason in reasons:
-        st.write(f"• {reason}")
-    st.caption("Bu sürüm yalnızca teknik puan üretir. Makro, haber, COT ve çoklu zaman dilimi teyitleri henüz bağlı değil.")
+    st.subheader("RSI")
+
+    rsi_fig = go.Figure()
+
+    rsi_fig.add_trace(
+        go.Scatter(
+            x=data.index,
+            y=data["RSI"],
+            mode="lines",
+            name="RSI"
+        )
+    )
+
+    rsi_fig.add_hline(y=70, line_dash="dash")
+    rsi_fig.add_hline(y=30, line_dash="dash")
+
+    rsi_fig.update_layout(
+        height=300,
+        yaxis_range=[0, 100],
+        template="plotly_dark"
+    )
+
+    st.plotly_chart(
+        rsi_fig,
+        use_container_width=True
+    )
+
 with right:
-    st.subheader("Risk referansları")
-    if pd.notna(last["atr"]):
-        st.write(f"ATR(14): **{last['atr']:.2f}** fiyat birimi")
-        st.write(f"Örnek 1.5 × ATR stop mesafesi: **{1.5 * last['atr']:.2f}**")
-        st.write(f"Örnek 3 × ATR hedef mesafesi: **{3 * last['atr']:.2f}**")
-        st.caption("Bunlar otomatik işlem önerisi değildir; gerçek stop ve hedefler fiyat yapısı, spread ve risk bütçesiyle doğrulanmalıdır.")
+    st.subheader("Volatilite")
+
+    if pd.notna(atr):
+        st.metric("ATR (14)", f"${float(atr):.2f}")
+        st.caption(
+            "ATR fiyatın olası hareket genişliğini ölçer; "
+            "yön tahmini değildir."
+        )
     else:
-        st.write("ATR hesaplamak için yeterli veri yok.")
+        st.info("ATR hesaplamak için yeterli veri yok.")
 
-st.subheader("Son mumlar ve göstergeler")
-display_cols = ["open", "high", "low", "close", "ema_fast", "ema_slow", "rsi", "macd", "atr"]
-st.dataframe(data[display_cols].tail(20).sort_index(ascending=False), use_container_width=True)
+# --------------------------------------------------
+# SON MUM VERİLERİ
+# --------------------------------------------------
+with st.expander("Son mum verilerini görüntüle"):
+    display_cols = [
+        "open",
+        "high",
+        "low",
+        "close",
+        "EMA_fast",
+        "EMA_slow",
+        "RSI",
+        "ATR"
+    ]
 
-st.subheader("İlk sürüm kapsamı")
-st.markdown("""
-- ✅ Demo veriyle çalışan arayüz
-- ✅ Twelve Data API üzerinden XAU/USD mumlarını alma
-- ✅ EMA, RSI, MACD, ATR ve Bollinger hesapları
-- ✅ Açıklanabilir, basit teknik puan
-- ⏳ Günlük/4 saatlik/1 saatlik çoklu zaman dilimi teyidi
-- ⏳ Makroekonomik veri ve haber entegrasyonu
-- ⏳ Geçmiş test, işlem maliyetleri ve sanal işlem günlüğü
-- ⏳ Kullanıcı hesabı, erişim güvenliği ve bildirimler
-""")
+    st.dataframe(
+        data[display_cols].tail(20).sort_index(
+            ascending=False
+        ),
+        use_container_width=True
+    )
+
+st.divider()
+
+st.caption(
+    "Bu uygulama basit teknik göstergeler kullanır. "
+    "Komisyon, spread, kayma ve işlem yürütme koşulları "
+    "hesaplanmaz. Tek başına alım-satım kararı için kullanılmamalıdır."
+)
