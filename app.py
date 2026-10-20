@@ -193,6 +193,7 @@ else:
 
 age_hours = (now_utc - last_time_utc).total_seconds() / 3600
 
+interval = st.session_state.get("interval", "4h")
 max_age = {"1h": 3, "4h": 6, "1day": 36}.get(interval, 6)
 
 if mode == "Twelve Data API":
