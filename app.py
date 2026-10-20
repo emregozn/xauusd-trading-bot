@@ -1,4 +1,5 @@
 
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -104,6 +105,14 @@ with st.sidebar:
         index=1
     )
 
+    st.divider()
+    st.header("🛡️ Risk ve test ayarları")
+    account_size = st.number_input("Hesap büyüklüğü ($)", min_value=100.0, max_value=10_000_000.0, value=10000.0, step=500.0)
+    risk_pct = st.slider("İşlem başına risk (%)", min_value=0.1, max_value=3.0, value=0.5, step=0.1)
+    backtest_holding = st.selectbox("Backtest pozisyonda kalma süresi (mum)", [1, 3, 5, 10], index=2)
+    backtest_cost_bps = st.number_input("Tahmini toplam işlem maliyeti (baz puan)", min_value=0.0, max_value=100.0, value=5.0, step=1.0, help="Spread + komisyon + kayma için yaklaşık maliyet. 5 baz puan = %0,05.")
+    enable_mtf = st.checkbox("Ek API çağrılarıyla çoklu zaman dilimi kontrolü", value=False, help="Açılırsa 1h, 4h ve günlük veri için ek API çağrıları yapılabilir; API kotanı tüketebilir.")
+    enable_alerts = st.checkbox("Telegram bildirimi özelliğini göster", value=False)
     st.caption("API anahtarı Streamlit Secrets üzerinden okunur.")
 
 # --------------------------------------------------
@@ -283,6 +292,85 @@ def add_indicators(data, rsi_period, ema_fast, ema_slow):
     )
 
     return data
+
+
+# --------------------------------------------------
+# EK ANALİZ FONKSİYONLARI
+# --------------------------------------------------
+def add_signal_columns(frame, fast_period, slow_period, rsi_period=14):
+    """Backtest için yalnızca ilgili mumda bilinen verilerle sinyal üretir."""
+    x = frame.copy()
+    x["ema_f_bt"] = x["close"].ewm(span=fast_period, adjust=False).mean()
+    x["ema_s_bt"] = x["close"].ewm(span=slow_period, adjust=False).mean()
+    delta = x["close"].diff()
+    gain = delta.clip(lower=0).ewm(alpha=1/rsi_period, min_periods=rsi_period, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1/rsi_period, min_periods=rsi_period, adjust=False).mean()
+    rs = gain / loss.replace(0, np.nan)
+    x["rsi_bt"] = (100 - 100 / (1 + rs)).fillna(50)
+    x["score_bt"] = 0
+    x.loc[x["ema_f_bt"] > x["ema_s_bt"], "score_bt"] += 1
+    x.loc[x["ema_f_bt"] < x["ema_s_bt"], "score_bt"] -= 1
+    x.loc[x["close"] > x["ema_f_bt"], "score_bt"] += 1
+    x.loc[x["close"] < x["ema_f_bt"], "score_bt"] -= 1
+    rsi_delta = x["rsi_bt"].diff()
+    x.loc[(rsi_delta > 0) & x["rsi_bt"].between(40, 70), "score_bt"] += 1
+    x.loc[(rsi_delta < 0) & x["rsi_bt"].between(30, 60), "score_bt"] -= 1
+    x["signal_bt"] = np.select([x["score_bt"] >= 2, x["score_bt"] <= -2], [1, -1], default=0)
+    return x
+
+
+def run_backtest(frame, fast_period, slow_period, holding_bars, cost_bps):
+    """Simple fixed-holding-period test. Signal at close, enter next open, exit after N bars."""
+    x = add_signal_columns(frame, fast_period, slow_period).dropna(subset=["open", "close"])
+    rows = []
+    n = len(x)
+    cost = float(cost_bps) / 10000.0
+    for i in range(n - holding_bars - 1):
+        side = int(x["signal_bt"].iloc[i])
+        if side == 0:
+            continue
+        entry_i = i + 1
+        exit_i = min(entry_i + holding_bars - 1, n - 1)
+        entry = float(x["open"].iloc[entry_i])
+        exit_price = float(x["close"].iloc[exit_i])
+        if entry <= 0:
+            continue
+        gross = (exit_price / entry - 1.0) * side
+        net = gross - cost
+        rows.append({"Sinyal zamanı": x.index[i], "Giriş zamanı": x.index[entry_i], "Çıkış zamanı": x.index[exit_i], "Yön": "AL" if side == 1 else "SAT", "Giriş": entry, "Çıkış": exit_price, "Net getiri %": net * 100, "Sonuç": "Kâr" if net > 0 else "Zarar" if net < 0 else "Başa baş"})
+    trades = pd.DataFrame(rows)
+    if trades.empty:
+        return trades, pd.Series(dtype=float), {}
+    trades["Equity"] = (1 + trades["Net getiri %"] / 100).cumprod()
+    win_rate = float((trades["Net getiri %"] > 0).mean() * 100)
+    gross_profit = float(trades.loc[trades["Net getiri %"] > 0, "Net getiri %"].sum())
+    gross_loss = abs(float(trades.loc[trades["Net getiri %"] < 0, "Net getiri %"].sum()))
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else np.nan
+    equity = trades["Equity"]
+    max_dd = float(((equity / equity.cummax()) - 1).min() * 100)
+    total_return = float((equity.iloc[-1] - 1) * 100)
+    stats = {"İşlem sayısı": len(trades), "Kazanma oranı": win_rate, "Net getiri": total_return, "Kâr faktörü": profit_factor, "Maks. düşüş": max_dd}
+    return trades, equity, stats
+
+
+def classify_regime(frame, atr_value, ema_fast_value, ema_slow_value, close_value):
+    if pd.isna(atr_value) or close_value <= 0:
+        return "Veri yetersiz", "Piyasa rejimi için ATR verisi bulunamadı."
+    atr_pct = float(atr_value) / float(close_value) * 100
+    ema_gap_pct = abs(float(ema_fast_value) - float(ema_slow_value)) / float(close_value) * 100
+    if atr_pct >= 0.8:
+        return "Yüksek volatilite", f"ATR yaklaşık %{atr_pct:.2f}; hareket aralığı yükselmiş."
+    if ema_gap_pct >= 0.25:
+        direction = "yukarı" if ema_fast_value > ema_slow_value else "aşağı"
+        return "Trend piyasası", f"EMA'lar ayrışmış; kısa vadeli yön {direction}."
+    return "Yatay / zayıf trend", f"EMA farkı %{ema_gap_pct:.2f}; trend gücü sınırlı olabilir."
+
+
+def resample_ohlc(frame, rule):
+    agg = {"open": "first", "high": "max", "low": "min", "close": "last"}
+    if "volume" in frame.columns:
+        agg["volume"] = "sum"
+    return frame.resample(rule).agg(agg).dropna(subset=["open", "high", "low", "close"])
 
 
 # --------------------------------------------------
@@ -508,6 +596,24 @@ if pd.notna(atr) and float(atr) > 0:
         }
 
 # --------------------------------------------------
+# DESTEK/DİRENÇ, REJİM VE POZİSYON BOYUTU
+# --------------------------------------------------
+regime_name, regime_detail = classify_regime(data, atr, ema_f, ema_s, price)
+lookback = min(50, len(data))
+recent = data.tail(lookback)
+resistance = float(recent["high"].max())
+support = float(recent["low"].min())
+
+position_risk_dollars = float(account_size) * float(risk_pct) / 100.0
+if pd.notna(atr) and float(atr) > 0:
+    stop_distance_for_size = float(atr) * 1.5
+    # XAU/USD standard contract sizing varies by broker; this is a price-unit estimate only.
+    estimated_units = position_risk_dollars / stop_distance_for_size
+else:
+    stop_distance_for_size = np.nan
+    estimated_units = np.nan
+
+# --------------------------------------------------
 # DASHBOARD ÖZETİ
 # --------------------------------------------------
 st.markdown("### Piyasa özeti")
@@ -607,6 +713,104 @@ st.caption(
     f"Mum aralığı: {interval} • "
     f"Son mum: {last_time.strftime('%Y-%m-%d %H:%M UTC')}"
 )
+
+# --------------------------------------------------
+# İLERİ ANALİZ MODÜLLERİ
+# --------------------------------------------------
+st.subheader("Piyasa yapısı ve işlem planı")
+mc1, mc2, mc3, mc4 = st.columns(4, gap="medium")
+mc1.metric("Piyasa rejimi", regime_name)
+mc2.metric("Son 50 mum desteği", f"${support:,.2f}")
+mc3.metric("Son 50 mum direnci", f"${resistance:,.2f}")
+mc4.metric("ATR / fiyat", f"{(float(atr) / price * 100):.2f}%" if pd.notna(atr) and price else "—")
+st.caption(regime_detail + " Destek/direnç seviyeleri son mumların en düşük/en yüksek değerlerinden yaklaşık olarak çıkarılmıştır; kesin seviye değildir.")
+
+with st.expander("Pozisyon büyüklüğü hesaplayıcı", expanded=False):
+    st.write(f"Hesap büyüklüğü: **${account_size:,.2f}** · İşlem başına risk bütçesi: **${position_risk_dollars:,.2f}** ({risk_pct:.1f}%).")
+    if pd.notna(estimated_units):
+        st.write(f"ATR × 1,5 stop mesafesi: **${stop_distance_for_size:,.2f}**.")
+        st.write(f"Fiyat birimi bazında yaklaşık büyüklük: **{estimated_units:,.4f} birim**.")
+        st.caption("Bu bir broker lotu değildir. XAU/USD sözleşme büyüklüğü, kaldıraç, para birimi ve broker kuralları bilinmeden lot miktarı kesin hesaplanamaz. Emir gönderilmez.")
+    else:
+        st.info("ATR hesaplanamadığı için pozisyon büyüklüğü hesaplanamadı.")
+
+if enable_mtf:
+    st.subheader("Çoklu zaman dilimi kontrolü")
+    st.warning("Bu kontrol seçili veri setinden daha yüksek zaman dilimleri üretir; API'den bağımsız yeni veri çekmez. Bu nedenle sonuçlar yalnızca mevcut veri çözünürlüğünün izin verdiği ölçüde anlamlıdır.")
+    try:
+        if interval == "1h":
+            tf_frames = {"1 saat": data, "4 saat (resample)": resample_ohlc(data, "4h"), "Günlük (resample)": resample_ohlc(data, "1D")}
+        elif interval == "4h":
+            tf_frames = {"4 saat": data, "Günlük (resample)": resample_ohlc(data, "1D")}
+        else:
+            tf_frames = {"Günlük": data}
+        tf_results = []
+        for tf_name, tf_frame in tf_frames.items():
+            if len(tf_frame) < max(ema_slow, 10):
+                tf_results.append({"Zaman dilimi": tf_name, "Yön": "Yetersiz veri", "Kapanış": float(tf_frame["close"].iloc[-1]) if len(tf_frame) else np.nan})
+                continue
+            tf_fast = tf_frame["close"].ewm(span=ema_fast, adjust=False).mean().iloc[-1]
+            tf_slow = tf_frame["close"].ewm(span=ema_slow, adjust=False).mean().iloc[-1]
+            tf_direction = "AL" if tf_fast > tf_slow else "SAT" if tf_fast < tf_slow else "NÖTR"
+            tf_results.append({"Zaman dilimi": tf_name, "Yön": tf_direction, "Kapanış": float(tf_frame["close"].iloc[-1])})
+        st.dataframe(pd.DataFrame(tf_results), use_container_width=True, hide_index=True)
+        directions = [r["Yön"] for r in tf_results if r["Yön"] in ("AL", "SAT")]
+        if directions and len(set(directions)) == 1:
+            st.success(f"Mevcut veri içinde hesaplanan zaman dilimleri {directions[0]} yönünde uyumlu.")
+        elif directions:
+            st.warning("Zaman dilimleri arasında yön ayrışması var.")
+        else:
+            st.info("Yeterli zaman dilimi verisi yok.")
+    except Exception as exc:
+        st.warning(f"Çoklu zaman dilimi analizi oluşturulamadı: {exc}")
+
+st.subheader("Geçmiş performans · Backtest")
+st.caption(f"Basit test: sinyal mum kapanışında oluşur, sonraki mum açılışından giriş varsayılır ve {backtest_holding} mum sonra kapanışta çıkılır. İşlem maliyeti yaklaşık olarak düşülür; stop/limit yürütmesi simüle edilmez.")
+try:
+    bt_trades, bt_equity, bt_stats = run_backtest(data, ema_fast, ema_slow, int(backtest_holding), float(backtest_cost_bps))
+    if not bt_stats:
+        st.info("Seçili veri aralığında test edilecek yeterli sinyal bulunamadı.")
+    else:
+        bc1, bc2, bc3, bc4, bc5 = st.columns(5, gap="small")
+        bc1.metric("İşlem sayısı", f"{bt_stats['İşlem sayısı']}")
+        bc2.metric("Kazanma oranı", f"{bt_stats['Kazanma oranı']:.1f}%")
+        bc3.metric("Net getiri (bileşik)", f"{bt_stats['Net getiri']:.2f}%")
+        pf = bt_stats["Kâr faktörü"]
+        bc4.metric("Kâr faktörü", f"{pf:.2f}" if pd.notna(pf) else "∞ / hesaplanamadı")
+        bc5.metric("Maks. düşüş", f"{bt_stats['Maks. düşüş']:.2f}%")
+        equity_fig = go.Figure()
+        equity_fig.add_trace(go.Scatter(y=bt_equity.values, mode="lines", name="Bileşik özsermaye", line=dict(color="#7eb6ff", width=2), fill="tozeroy"))
+        equity_fig.update_layout(height=260, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(11,18,32,0.55)", margin=dict(l=10,r=10,t=20,b=10), font=dict(color="#c8d5e8"), xaxis_title="İşlem sırası", yaxis_title="Başlangıç = 1,00", showlegend=False)
+        st.plotly_chart(equity_fig, use_container_width=True)
+        with st.expander("Backtest işlem listesi"):
+            bt_view = bt_trades.copy()
+            for col in ["Sinyal zamanı", "Giriş zamanı", "Çıkış zamanı"]:
+                bt_view[col] = pd.to_datetime(bt_view[col]).astype(str)
+            st.dataframe(bt_view.sort_values("Sinyal zamanı", ascending=False), use_container_width=True, hide_index=True)
+        st.warning("Bu ilk seviye bir araştırma backtest'idir; küçük örneklem, veri kalitesi, gerçek spread/kayma, broker sözleşme özellikleri ve mum içi stop/target sırası tam modellenmez. Sonuçlar gelecekteki performansı garanti etmez.")
+        with st.expander("İleri aşama: EMA parametre karşılaştırması"):
+            st.caption("Bu tarama geçmiş veride hızlı bir kıyaslama yapar. En iyi geçmiş sonucu seçmek aşırı uyuma yol açabilir; sonuçları ayrı bir test döneminde doğrulamak gerekir.")
+            sweep_rows = []
+            for fast_candidate in [9, 12, 20]:
+                for slow_candidate in [21, 26, 50]:
+                    if fast_candidate >= slow_candidate:
+                        continue
+                    _, _, sweep_stats = run_backtest(data, fast_candidate, slow_candidate, int(backtest_holding), float(backtest_cost_bps))
+                    if sweep_stats:
+                        sweep_rows.append({"Hızlı EMA": fast_candidate, "Yavaş EMA": slow_candidate, "İşlem": sweep_stats["İşlem sayısı"], "Kazanma oranı %": round(sweep_stats["Kazanma oranı"], 1), "Net getiri %": round(sweep_stats["Net getiri"], 2), "Kâr faktörü": round(sweep_stats["Kâr faktörü"], 2) if pd.notna(sweep_stats["Kâr faktörü"]) else np.nan, "Maks. düşüş %": round(sweep_stats["Maks. düşüş"], 2)})
+            if sweep_rows:
+                st.dataframe(pd.DataFrame(sweep_rows).sort_values("Net getiri %", ascending=False), use_container_width=True, hide_index=True)
+            else:
+                st.info("Parametre karşılaştırması için yeterli işlem sinyali bulunamadı.")
+except Exception as exc:
+    st.warning(f"Backtest hesaplanamadı: {exc}")
+
+if enable_alerts:
+    st.subheader("Telegram bildirim kurulumu")
+    st.info("Güvenli bildirim için Streamlit Secrets içine TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID eklenebilir. Bu sürüm otomatik mesaj göndermiyor; tekrar eden mesajları ve yanlış alarmları önlemek için bildirim gönderimi ayrıca opt-in düğmesiyle kurulmalıdır.")
+    token_present = bool(st.secrets.get("TELEGRAM_BOT_TOKEN", ""))
+    chat_present = bool(st.secrets.get("TELEGRAM_CHAT_ID", ""))
+    st.write(f"Bot token: {'tanımlı' if token_present else 'tanımlı değil'} · Chat ID: {'tanımlı' if chat_present else 'tanımlı değil'}")
 
 # --------------------------------------------------
 # GRAFİK
