@@ -183,7 +183,30 @@ data = add_indicators(data, rsi_period, ema_fast, ema_slow)
 score, signal, reasons = score_signal(data)
 last = data.iloc[-1]
 last_time = data.index[-1]
+now_utc = pd.Timestamp.now(tz="UTC")
+last_time_utc = pd.Timestamp(last_time)
 
+if last_time_utc.tzinfo is None:
+    last_time_utc = last_time_utc.tz_localize("UTC")
+else:
+    last_time_utc = last_time_utc.tz_convert("UTC")
+
+age_hours = (now_utc - last_time_utc).total_seconds() / 3600
+
+max_age = {"1h": 3, "4h": 6, "1day": 36}.get(interval, 6)
+
+if mode == "Twelve Data API":
+    if age_hours < 0:
+        st.error("Veri zamanı geçersiz: zaman damgası gelecekte.")
+    elif age_hours > max_age:
+        st.error(
+            f"VERİ ESKİ: Son mum {age_hours:.1f} saat önce. "
+            "Bu veriye dayanarak sinyal değerlendirme."
+        )
+    else:
+        st.success(
+            f"Veri zamanı kontrolü geçti • Son mum {age_hours:.1f} saat önce"
+        )
 st.caption(f"Veri kaynağı: {source_label} • Son mum zamanı: {last_time.strftime('%Y-%m-%d %H:%M UTC')}")
 if mode == "Demo veri":
     st.warning("Demo modundasın. Aşağıdaki fiyatlar ve sinyal sentetiktir; işlem kararı için kullanma.")
