@@ -31,11 +31,11 @@ with st.sidebar:
     st.header("Veri kaynağı")
 
     mode = st.radio(
-        "Çalışma modu",
-        ["Twelve Data API", "Demo veri"],
-        index=0,
-        key="calisma_modu"
-    )
+    "Çalışma modu",
+    ["Twelve Data API", "Demo veri"],
+    index=0,
+    key="calisma_modu",
+)
     st.write("Seçili kaynak:", mode)
     interval = st.selectbox(
         "Mum aralığı",
