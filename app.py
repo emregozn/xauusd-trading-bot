@@ -18,10 +18,15 @@ st.warning(
 
 with st.sidebar:
     st.header("Veri kaynağı")
-    mode = st.radio(
+    if "calisma_modu" not in st.session_state:
+    st.session_state["calisma_modu"] = "Demo veri"
+
+mode = st.radio(
     "Çalışma modu",
     ["Demo veri", "Twelve Data API"],
-    index=0,
+    index=["Demo veri", "Twelve Data API"].index(
+        st.session_state["calisma_modu"]
+    ),
     key="calisma_modu"
 )
     api_key = st.secrets.get("TWELVE_DATA_API_KEY", "")
