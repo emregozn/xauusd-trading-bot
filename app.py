@@ -1,5 +1,4 @@
 
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -626,14 +625,7 @@ recent = data.tail(lookback)
 resistance = float(recent["high"].max())
 support = float(recent["low"].min())
 
-position_risk_dollars = float(account_size) * float(risk_pct) / 100.0
-if pd.notna(atr) and float(atr) > 0:
-    stop_distance_for_size = float(atr) * 1.5
-    # XAU/USD standard contract sizing varies by broker; this is a price-unit estimate only.
-    estimated_units = position_risk_dollars / stop_distance_for_size
-else:
-    stop_distance_for_size = np.nan
-    estimated_units = np.nan
+# Eski risk-yuzdesi pozisyon boyutlandırması kaldırıldı; sanal işlem tutarı paper_amount ile yönetilir.
 
 # --------------------------------------------------
 # DASHBOARD ÖZETİ
