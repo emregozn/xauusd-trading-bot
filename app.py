@@ -106,11 +106,10 @@ with st.sidebar:
     )
 
     st.divider()
-    st.header("🛡️ Risk ve test ayarları")
-    account_size = st.number_input("Hesap büyüklüğü ($)", min_value=100.0, max_value=10_000_000.0, value=10000.0, step=500.0)
-    risk_pct = st.slider("İşlem başına risk (%)", min_value=0.1, max_value=3.0, value=0.5, step=0.1)
-    backtest_holding = st.selectbox("Backtest pozisyonda kalma süresi (mum)", [1, 3, 5, 10], index=2)
-    backtest_cost_bps = st.number_input("Tahmini toplam işlem maliyeti (baz puan)", min_value=0.0, max_value=100.0, value=5.0, step=1.0, help="Spread + komisyon + kayma için yaklaşık maliyet. 5 baz puan = %0,05.")
+    st.header("🧪 Sanal işlem hesabı")
+    account_size = st.number_input("Başlangıç bakiyesi ($)", min_value=100.0, max_value=10_000_000.0, value=10000.0, step=500.0, help="Sadece sanal takip hesabı; gerçek broker hesabına bağlı değildir.")
+    paper_amount = st.number_input("İşlem tutarı ($)", min_value=1.0, max_value=1_000_000.0, value=100.0, step=10.0, help="Örneğin 100 $, altının fiyat hareketine göre sanal kâr/zarar hesaplar. Kaldıraç ve broker lotu modellenmez.")
+    st.caption("Aşağıdaki AL / SAT düğmeleri yalnızca sanal işlem kaydı oluşturur; gerçek emir göndermez.")
     enable_mtf = st.checkbox("Ek API çağrılarıyla çoklu zaman dilimi kontrolü", value=False, help="Açılırsa 1h, 4h ve günlük veri için ek API çağrıları yapılabilir; API kotanı tüketebilir.")
     enable_alerts = st.checkbox("Telegram bildirimi özelliğini göster", value=False)
     st.caption("API anahtarı Streamlit Secrets üzerinden okunur.")
@@ -297,62 +296,6 @@ def add_indicators(data, rsi_period, ema_fast, ema_slow):
 # --------------------------------------------------
 # EK ANALİZ FONKSİYONLARI
 # --------------------------------------------------
-def add_signal_columns(frame, fast_period, slow_period, rsi_period=14):
-    """Backtest için yalnızca ilgili mumda bilinen verilerle sinyal üretir."""
-    x = frame.copy()
-    x["ema_f_bt"] = x["close"].ewm(span=fast_period, adjust=False).mean()
-    x["ema_s_bt"] = x["close"].ewm(span=slow_period, adjust=False).mean()
-    delta = x["close"].diff()
-    gain = delta.clip(lower=0).ewm(alpha=1/rsi_period, min_periods=rsi_period, adjust=False).mean()
-    loss = (-delta.clip(upper=0)).ewm(alpha=1/rsi_period, min_periods=rsi_period, adjust=False).mean()
-    rs = gain / loss.replace(0, np.nan)
-    x["rsi_bt"] = (100 - 100 / (1 + rs)).fillna(50)
-    x["score_bt"] = 0
-    x.loc[x["ema_f_bt"] > x["ema_s_bt"], "score_bt"] += 1
-    x.loc[x["ema_f_bt"] < x["ema_s_bt"], "score_bt"] -= 1
-    x.loc[x["close"] > x["ema_f_bt"], "score_bt"] += 1
-    x.loc[x["close"] < x["ema_f_bt"], "score_bt"] -= 1
-    rsi_delta = x["rsi_bt"].diff()
-    x.loc[(rsi_delta > 0) & x["rsi_bt"].between(40, 70), "score_bt"] += 1
-    x.loc[(rsi_delta < 0) & x["rsi_bt"].between(30, 60), "score_bt"] -= 1
-    x["signal_bt"] = np.select([x["score_bt"] >= 2, x["score_bt"] <= -2], [1, -1], default=0)
-    return x
-
-
-def run_backtest(frame, fast_period, slow_period, holding_bars, cost_bps):
-    """Simple fixed-holding-period test. Signal at close, enter next open, exit after N bars."""
-    x = add_signal_columns(frame, fast_period, slow_period).dropna(subset=["open", "close"])
-    rows = []
-    n = len(x)
-    cost = float(cost_bps) / 10000.0
-    for i in range(n - holding_bars - 1):
-        side = int(x["signal_bt"].iloc[i])
-        if side == 0:
-            continue
-        entry_i = i + 1
-        exit_i = min(entry_i + holding_bars - 1, n - 1)
-        entry = float(x["open"].iloc[entry_i])
-        exit_price = float(x["close"].iloc[exit_i])
-        if entry <= 0:
-            continue
-        gross = (exit_price / entry - 1.0) * side
-        net = gross - cost
-        rows.append({"Sinyal zamanı": x.index[i], "Giriş zamanı": x.index[entry_i], "Çıkış zamanı": x.index[exit_i], "Yön": "AL" if side == 1 else "SAT", "Giriş": entry, "Çıkış": exit_price, "Net getiri %": net * 100, "Sonuç": "Kâr" if net > 0 else "Zarar" if net < 0 else "Başa baş"})
-    trades = pd.DataFrame(rows)
-    if trades.empty:
-        return trades, pd.Series(dtype=float), {}
-    trades["Equity"] = (1 + trades["Net getiri %"] / 100).cumprod()
-    win_rate = float((trades["Net getiri %"] > 0).mean() * 100)
-    gross_profit = float(trades.loc[trades["Net getiri %"] > 0, "Net getiri %"].sum())
-    gross_loss = abs(float(trades.loc[trades["Net getiri %"] < 0, "Net getiri %"].sum()))
-    profit_factor = gross_profit / gross_loss if gross_loss > 0 else np.nan
-    equity = trades["Equity"]
-    max_dd = float(((equity / equity.cummax()) - 1).min() * 100)
-    total_return = float((equity.iloc[-1] - 1) * 100)
-    stats = {"İşlem sayısı": len(trades), "Kazanma oranı": win_rate, "Net getiri": total_return, "Kâr faktörü": profit_factor, "Maks. düşüş": max_dd}
-    return trades, equity, stats
-
-
 def classify_regime(frame, atr_value, ema_fast_value, ema_slow_value, close_value):
     if pd.isna(atr_value) or close_value <= 0:
         return "Veri yetersiz", "Piyasa rejimi için ATR verisi bulunamadı."
@@ -364,6 +307,29 @@ def classify_regime(frame, atr_value, ema_fast_value, ema_slow_value, close_valu
         direction = "yukarı" if ema_fast_value > ema_slow_value else "aşağı"
         return "Trend piyasası", f"EMA'lar ayrışmış; kısa vadeli yön {direction}."
     return "Yatay / zayıf trend", f"EMA farkı %{ema_gap_pct:.2f}; trend gücü sınırlı olabilir."
+
+
+def load_paper_trades(path="paper_trades.json"):
+    """Load simulated trades from the app working directory, if available."""
+    import json
+    from pathlib import Path
+    file_path = Path(path)
+    if not file_path.exists():
+        return []
+    try:
+        with file_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def save_paper_trades(trades, path="paper_trades.json"):
+    """Save simulated trades locally; cloud restarts may reset local files."""
+    import json
+    from pathlib import Path
+    with Path(path).open("w", encoding="utf-8") as f:
+        json.dump(trades, f, ensure_ascii=False, indent=2, default=str)
 
 
 def resample_ohlc(frame, rule):
@@ -472,6 +438,62 @@ rsi = float(last["RSI"])
 atr = last["ATR"]
 ema_f = float(last["EMA_fast"])
 ema_s = float(last["EMA_slow"])
+
+# --------------------------------------------------
+# SANAL İŞLEM KAYDI (GERÇEK EMİR GÖNDERMEZ)
+# --------------------------------------------------
+import uuid
+
+if "paper_trades" not in st.session_state:
+    st.session_state.paper_trades = load_paper_trades()
+
+# Actions are rendered in the sidebar, after a current market price is available.
+with st.sidebar:
+    st.divider()
+    st.subheader("🧾 Sanal işlem aç / kapat")
+    st.caption(f"Referans fiyat: ${price:,.2f} · Güncel seçili grafiğin son kapanışı")
+    if st.button("🟢 AL — sanal pozisyon aç", use_container_width=True, key="paper_buy"):
+        if paper_amount > 0 and price > 0:
+            st.session_state.paper_trades.append({
+                "id": str(uuid.uuid4())[:8], "side": "AL", "notional": float(paper_amount),
+                "entry_price": float(price), "quantity": float(paper_amount) / float(price),
+                "opened_at": datetime.now(timezone.utc).isoformat(), "status": "Açık",
+                "exit_price": None, "closed_at": None, "pnl": None, "pnl_pct": None
+            })
+            save_paper_trades(st.session_state.paper_trades)
+            st.success(f"${paper_amount:,.2f} tutarında sanal AL pozisyonu açıldı.")
+    if st.button("🔴 SAT — sanal kısa pozisyon aç", use_container_width=True, key="paper_sell"):
+        if paper_amount > 0 and price > 0:
+            st.session_state.paper_trades.append({
+                "id": str(uuid.uuid4())[:8], "side": "SAT", "notional": float(paper_amount),
+                "entry_price": float(price), "quantity": float(paper_amount) / float(price),
+                "opened_at": datetime.now(timezone.utc).isoformat(), "status": "Açık",
+                "exit_price": None, "closed_at": None, "pnl": None, "pnl_pct": None
+            })
+            save_paper_trades(st.session_state.paper_trades)
+            st.success(f"${paper_amount:,.2f} tutarında sanal SAT pozisyonu açıldı.")
+
+    open_trades_sidebar = [t for t in st.session_state.paper_trades if t.get("status") == "Açık"]
+    if open_trades_sidebar:
+        close_options = {f"{t['id']} · {t['side']} · ${t['notional']:,.2f} · giriş ${t['entry_price']:,.2f}": t["id"] for t in open_trades_sidebar}
+        selected_close_label = st.selectbox("Kapatılacak açık pozisyon", list(close_options.keys()), key="paper_close_select")
+        if st.button("Pozisyonu mevcut fiyattan kapat", use_container_width=True, key="paper_close"):
+            selected_id = close_options[selected_close_label]
+            for trade in st.session_state.paper_trades:
+                if trade.get("id") == selected_id and trade.get("status") == "Açık":
+                    direction = 1 if trade["side"] == "AL" else -1
+                    pnl = (float(price) - float(trade["entry_price"])) * float(trade["quantity"]) * direction
+                    trade["exit_price"] = float(price)
+                    trade["closed_at"] = datetime.now(timezone.utc).isoformat()
+                    trade["pnl"] = round(pnl, 4)
+                    trade["pnl_pct"] = round(pnl / float(trade["notional"]) * 100, 4)
+                    trade["status"] = "Kapalı"
+                    break
+            save_paper_trades(st.session_state.paper_trades)
+            st.success("Sanal pozisyon kapatıldı ve sonucu kaydedildi.")
+            st.rerun()
+    else:
+        st.caption("Henüz açık sanal pozisyon yok.")
 
 # Sinyal bileşenleri: trend, fiyat konumu ve RSI momentumu.
 # RSI'nin yalnızca 30 altı / 70 üstü olması tek başına yön sinyali sayılmaz.
@@ -726,14 +748,6 @@ mc3.metric("Yakın direnç", f"${resistance:,.2f}")
 mc4.metric("ATR / fiyat", f"{(float(atr) / price * 100):.2f}%" if pd.notna(atr) and price else "—")
 st.caption(regime_detail + " Destek/direnç, geçmiş mumlardaki dönüş noktalarından türetilen yaklaşık fiyat bölgeleridir; kesin veya değişmez seviyeler değildir.")
 
-with st.expander("Pozisyon büyüklüğü hesaplayıcı", expanded=False):
-    st.write(f"Hesap büyüklüğü: **${account_size:,.2f}** · İşlem başına risk bütçesi: **${position_risk_dollars:,.2f}** ({risk_pct:.1f}%).")
-    if pd.notna(estimated_units):
-        st.write(f"ATR × 1,5 stop mesafesi: **${stop_distance_for_size:,.2f}**.")
-        st.write(f"Fiyat birimi bazında yaklaşık büyüklük: **{estimated_units:,.4f} birim**.")
-        st.caption("Bu bir broker lotu değildir. XAU/USD sözleşme büyüklüğü, kaldıraç, para birimi ve broker kuralları bilinmeden lot miktarı kesin hesaplanamaz. Emir gönderilmez.")
-    else:
-        st.info("ATR hesaplanamadığı için pozisyon büyüklüğü hesaplanamadı.")
 
 if enable_mtf:
     st.subheader("Çoklu zaman dilimi kontrolü")
@@ -765,47 +779,57 @@ if enable_mtf:
     except Exception as exc:
         st.warning(f"Çoklu zaman dilimi analizi oluşturulamadı: {exc}")
 
-st.subheader("Geçmiş performans · Backtest")
-st.caption(f"Basit test: sinyal mum kapanışında oluşur, sonraki mum açılışından giriş varsayılır ve {backtest_holding} mum sonra kapanışta çıkılır. İşlem maliyeti yaklaşık olarak düşülür; stop/limit yürütmesi simüle edilmez.")
-st.info("Bu bölüm senin hesabının gerçek geçmiş performansı değil. Uygulama, seçili grafikteki geçmiş mumlara basit bir kural uygulayıp 'geçmişte bu kuralla işlem yapılsaydı ne olurdu?' diye simüle eder. Gerçek emirlerini, hesabını veya broker geçmişini okumaz; sonuçlar gelecekteki kazancı garanti etmez.")
-try:
-    bt_trades, bt_equity, bt_stats = run_backtest(data, ema_fast, ema_slow, int(backtest_holding), float(backtest_cost_bps))
-    if not bt_stats:
-        st.info("Seçili veri aralığında test edilecek yeterli sinyal bulunamadı.")
-    else:
-        bc1, bc2, bc3, bc4, bc5 = st.columns(5, gap="small")
-        bc1.metric("İşlem sayısı", f"{bt_stats['İşlem sayısı']}")
-        bc2.metric("Kazanma oranı", f"{bt_stats['Kazanma oranı']:.1f}%")
-        bc3.metric("Net getiri (bileşik)", f"{bt_stats['Net getiri']:.2f}%")
-        pf = bt_stats["Kâr faktörü"]
-        bc4.metric("Kâr faktörü", f"{pf:.2f}" if pd.notna(pf) else "∞ / hesaplanamadı")
-        bc5.metric("Maks. düşüş", f"{bt_stats['Maks. düşüş']:.2f}%")
-        equity_fig = go.Figure()
-        equity_fig.add_trace(go.Scatter(y=bt_equity.values, mode="lines", name="Bileşik özsermaye", line=dict(color="#7eb6ff", width=2), fill="tozeroy"))
-        equity_fig.update_layout(height=260, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(11,18,32,0.55)", margin=dict(l=10,r=10,t=20,b=10), font=dict(color="#c8d5e8"), xaxis_title="İşlem sırası", yaxis_title="Başlangıç = 1,00", showlegend=False)
-        st.plotly_chart(equity_fig, use_container_width=True)
-        with st.expander("Backtest işlem listesi"):
-            bt_view = bt_trades.copy()
-            for col in ["Sinyal zamanı", "Giriş zamanı", "Çıkış zamanı"]:
-                bt_view[col] = pd.to_datetime(bt_view[col]).astype(str)
-            st.dataframe(bt_view.sort_values("Sinyal zamanı", ascending=False), use_container_width=True, hide_index=True)
-        st.warning("Bu ilk seviye bir araştırma backtest'idir; küçük örneklem, veri kalitesi, gerçek spread/kayma, broker sözleşme özellikleri ve mum içi stop/target sırası tam modellenmez. Sonuçlar gelecekteki performansı garanti etmez.")
-        with st.expander("İleri aşama: EMA parametre karşılaştırması"):
-            st.caption("Bu tarama geçmiş veride hızlı bir kıyaslama yapar. En iyi geçmiş sonucu seçmek aşırı uyuma yol açabilir; sonuçları ayrı bir test döneminde doğrulamak gerekir.")
-            sweep_rows = []
-            for fast_candidate in [9, 12, 20]:
-                for slow_candidate in [21, 26, 50]:
-                    if fast_candidate >= slow_candidate:
-                        continue
-                    _, _, sweep_stats = run_backtest(data, fast_candidate, slow_candidate, int(backtest_holding), float(backtest_cost_bps))
-                    if sweep_stats:
-                        sweep_rows.append({"Hızlı EMA": fast_candidate, "Yavaş EMA": slow_candidate, "İşlem": sweep_stats["İşlem sayısı"], "Kazanma oranı %": round(sweep_stats["Kazanma oranı"], 1), "Net getiri %": round(sweep_stats["Net getiri"], 2), "Kâr faktörü": round(sweep_stats["Kâr faktörü"], 2) if pd.notna(sweep_stats["Kâr faktörü"]) else np.nan, "Maks. düşüş %": round(sweep_stats["Maks. düşüş"], 2)})
-            if sweep_rows:
-                st.dataframe(pd.DataFrame(sweep_rows).sort_values("Net getiri %", ascending=False), use_container_width=True, hide_index=True)
-            else:
-                st.info("Parametre karşılaştırması için yeterli işlem sinyali bulunamadı.")
-except Exception as exc:
-    st.warning(f"Backtest hesaplanamadı: {exc}")
+
+# --------------------------------------------------
+# KULLANICININ SANAL İŞLEM PERFORMANSI (BACKTEST DEĞİL)
+# --------------------------------------------------
+st.subheader("Senin sanal işlemlerin · Kâr / zarar takibi")
+st.caption("Bu bölüm yalnızca senin AL/SAT düğmeleriyle açıp kapattığın sanal işlemleri hesaplar. Geçmiş mumlara otomatik strateji uygulamaz ve gerçek emir göndermez. Açık işlemlerin kâr/zararı son kapanış fiyatına göre anlık tahmindir.")
+
+paper_trades = st.session_state.paper_trades
+closed_trades = [t for t in paper_trades if t.get("status") == "Kapalı"]
+open_trades = [t for t in paper_trades if t.get("status") == "Açık"]
+realized_pnl = sum(float(t.get("pnl") or 0) for t in closed_trades)
+open_pnl = sum((price - float(t["entry_price"])) * float(t["quantity"]) * (1 if t["side"] == "AL" else -1) for t in open_trades)
+wins = sum(1 for t in closed_trades if float(t.get("pnl") or 0) > 0)
+losses = sum(1 for t in closed_trades if float(t.get("pnl") or 0) < 0)
+win_rate = wins / len(closed_trades) * 100 if closed_trades else 0.0
+
+pc1, pc2, pc3, pc4, pc5, pc6 = st.columns(6, gap="small")
+pc1.metric("Başlangıç bakiyesi", f"${account_size:,.2f}")
+pc2.metric("Kapanan işlem", f"{len(closed_trades)}")
+pc3.metric("Kazanma oranı", f"{win_rate:.1f}%", help="Kârlı kapanan işlemler / tüm kapanan işlemler. İşlem yoksa %0 gösterilir.")
+pc4.metric("Gerçekleşmiş sanal K/Z", f"${realized_pnl:+,.2f}")
+pc5.metric("Açık işlemlerin K/Z'si", f"${open_pnl:+,.2f}")
+pc6.metric("Tahmini sanal bakiye", f"${account_size + realized_pnl + open_pnl:,.2f}")
+
+if open_trades:
+    open_rows = []
+    for t in open_trades:
+        direction = 1 if t["side"] == "AL" else -1
+        live_pnl = (price - float(t["entry_price"])) * float(t["quantity"]) * direction
+        open_rows.append({"ID": t["id"], "Yön": t["side"], "Tutar ($)": round(float(t["notional"]), 2), "Giriş fiyatı": round(float(t["entry_price"]), 2), "Son fiyat": round(price, 2), "Açık K/Z ($)": round(live_pnl, 2), "Getiri (%)": round(live_pnl / float(t["notional"]) * 100, 2), "Açılış (UTC)": t["opened_at"]})
+    st.markdown("**Açık pozisyonlar**")
+    st.dataframe(pd.DataFrame(open_rows), use_container_width=True, hide_index=True)
+
+if paper_trades:
+    history_rows = []
+    for t in reversed(paper_trades):
+        direction = 1 if t["side"] == "AL" else -1
+        live_pnl = (price - float(t["entry_price"])) * float(t["quantity"]) * direction if t.get("status") == "Açık" else float(t.get("pnl") or 0)
+        history_rows.append({"ID": t["id"], "Yön": t["side"], "Tutar ($)": round(float(t["notional"]), 2), "Giriş": round(float(t["entry_price"]), 2), "Çıkış": round(float(t["exit_price"]), 2) if t.get("exit_price") is not None else "—", "Durum": t["status"], "Sanal K/Z ($)": round(live_pnl, 2), "Getiri (%)": round(live_pnl / float(t["notional"]) * 100, 2), "Açılış (UTC)": t["opened_at"], "Kapanış (UTC)": t.get("closed_at") or "—"})
+    history_df = pd.DataFrame(history_rows)
+    st.markdown("**İşlem geçmişin**")
+    st.dataframe(history_df, use_container_width=True, hide_index=True)
+    st.download_button("İşlem geçmişini CSV olarak indir", history_df.to_csv(index=False).encode("utf-8-sig"), file_name="sanal_islem_gecmisi.csv", mime="text/csv")
+    if st.button("Tüm sanal işlem geçmişini sil", key="paper_clear_history"):
+        st.session_state.paper_trades = []
+        save_paper_trades([])
+        st.rerun()
+else:
+    st.info("Henüz sanal işlem yok. Soldaki panelden örneğin 100 $ tutarında AL veya SAT işlemi açıp, sonra fiyatı izleyebilir ve istediğin zaman kapatabilirsin.")
+
+st.warning("Kayıtlar bu uygulama örneğinin yerel dosyasına yazılır. Streamlit Cloud yeniden başlatıldığında veya uygulama yeniden dağıtıldığında yerel dosya sıfırlanabilir; kalıcı yedek için CSV indir. Hesaplamalar kaldıraç, swap, spread ve komisyon içermez.")
 
 if enable_alerts:
     st.subheader("Telegram bildirim kurulumu")
@@ -818,7 +842,8 @@ if enable_alerts:
 # GRAFİK
 # --------------------------------------------------
 st.subheader("Fiyat grafiği: destek ve direnç seviyeleri")
-st.caption("Yeşil kesikli çizgiler destek (fiyatın düşüşte tutunabileceği bölgeler), kırmızı kesikli çizgiler direnç (fiyatın yükselişte zorlanabileceği bölgeler). Turkuaz/turuncu çizgiler EMA trend göstergeleridir. Seviyeler seçili veri setindeki son 50 mumdan hesaplanır.")
+st.markdown('<span style="color:#45d6a5;font-weight:800">YEŞİL KESİKLİ ÇİZGİ = DESTEK</span> · <span style="color:#ff7185;font-weight:800">KIRMIZI KESİKLİ ÇİZGİ = DİRENÇ</span> · <span style="color:#42d6a4;font-weight:800">Turkuaz = hızlı EMA</span> · <span style="color:#ffbf69;font-weight:800">Turuncu = yavaş EMA</span>', unsafe_allow_html=True)
+st.caption("Destek, fiyatın düşüşte tutunabileceği; direnç ise yükselişte zorlanabileceği yaklaşık bölgedir. Seviyeler seçili veri setindeki son 50 mumun yerel dip/tepelerinden hesaplanır; garanti değildir.")
 
 fig = go.Figure()
 
@@ -979,5 +1004,5 @@ with st.expander("Ham veriler · Son 20 mum"):
 st.divider()
 
 st.caption(
-    "Bilgilendirme: Bu uygulama basit teknik göstergeler kullanır. Komisyon, spread, kayma ve işlem yürütme koşulları hesaplanmaz. Tek başına alım-satım kararı için kullanılmamalıdır."
+    "Bilgilendirme: AL/SAT düğmeleri yalnızca sanal kayıt oluşturur. K/Z tahminidir; komisyon, spread, kayma, kaldıraç ve broker sözleşme koşulları modellenmez. Tek başına alım-satım kararı için kullanılmamalıdır."
 )
