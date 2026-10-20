@@ -1,5 +1,4 @@
 
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -16,20 +15,42 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📈 XAU/USD Trading Dashboard")
-st.caption("Altın / ABD Doları • Teknik analiz ve sanal sinyal takibi")
+st.markdown("""
+<style>
+  .stApp { background: radial-gradient(ellipse at top left, #17243b 0%, #0b1220 42%, #080d17 100%); color: #e7edf7; }
+  [data-testid="stSidebar"] { background: linear-gradient(180deg, #101a2b 0%, #0b1220 100%); border-right: 1px solid #26344a; }
+  [data-testid="stMetric"] { background: linear-gradient(145deg, rgba(25,39,61,.95), rgba(14,24,40,.95)); border: 1px solid #2a3a52; padding: 16px 18px; border-radius: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.16); }
+  [data-testid="stMetricLabel"] { color: #9fb0c9 !important; }
+  [data-testid="stMetricValue"] { color: #f4f7fc !important; }
+  h1, h2, h3 { letter-spacing: -0.025em; }
+  h1 { color: #f6f8fc; }
+  h2, h3 { color: #dbe7f8; }
+  div[data-testid="stDataFrame"] { border: 1px solid #28384f; border-radius: 12px; overflow: hidden; }
+  div[data-testid="stAlert"] { border-radius: 12px; }
+  .hero { padding: 22px 24px; border: 1px solid #2a3b54; border-radius: 18px; background: linear-gradient(110deg, rgba(24,39,62,.96), rgba(13,22,37,.96)); margin-bottom: 18px; }
+  .hero-kicker { color: #8ea9ce; font-size: 12px; text-transform: uppercase; letter-spacing: .16em; font-weight: 700; }
+  .hero-title { color: #f5f8ff; font-size: 30px; line-height: 1.15; font-weight: 750; margin-top: 7px; }
+  .hero-sub { color: #9fb0c9; font-size: 14px; margin-top: 8px; }
+  .pill { display: inline-block; border: 1px solid #344a68; background: #15243a; color: #c7d8ef; border-radius: 999px; padding: 5px 10px; margin-right: 6px; font-size: 12px; }
+  .section-note { color: #93a6c1; font-size: 13px; }
+  hr { border-color: #26364d !important; }
+</style>
+<div class="hero">
+  <div class="hero-kicker">MARKET INTELLIGENCE · XAU/USD</div>
+  <div class="hero-title">Gold Trading Dashboard</div>
+  <div class="hero-sub">Teknik görünüm, momentum, volatilite ve risk seviyeleri tek ekranda.</div>
+  <div style="margin-top:14px"><span class="pill">TEKNİK ANALİZ</span><span class="pill">RİSK YÖNETİMİ</span><span class="pill">SİNYAL TAKİBİ</span></div>
+</div>
+""", unsafe_allow_html=True)
 
-st.warning(
-    "Bu uygulama eğitim ve analiz amaçlıdır. "
-    "Sinyaller yatırım tavsiyesi değildir. "
-    "Gerçek işlem yapmadan önce sanal test ve geçmiş veri testi yapın."
-)
+with st.expander("Kullanım ve risk uyarısı", expanded=False):
+    st.write("Bu uygulama eğitim ve analiz amaçlıdır. Sinyaller yatırım tavsiyesi değildir. Gerçek işlem yapmadan önce sanal test ve geçmiş veri testi yapın.")
 
 # --------------------------------------------------
 # VERİ KAYNAĞI VE AYARLAR
 # --------------------------------------------------
 with st.sidebar:
-    st.header("Veri kaynağı")
+    st.header("⚙️ Veri kaynağı")
 
     mode = st.radio(
     "Çalışma modu",
@@ -46,7 +67,7 @@ with st.sidebar:
     )
 
     st.divider()
-    st.header("Analiz ayarları")
+    st.header("📐 Analiz ayarları")
 
     rsi_period = st.slider(
         "RSI periyodu",
@@ -435,9 +456,15 @@ if pd.notna(atr) and float(atr) > 0:
         }
 
 # --------------------------------------------------
+# DASHBOARD ÖZETİ
+# --------------------------------------------------
+st.markdown("### Piyasa özeti")
+st.caption(f"Kaynak: {mode}  ·  Zaman dilimi: {interval}  ·  Son mum: {last_time.strftime('%Y-%m-%d %H:%M UTC')}")
+
+# --------------------------------------------------
 # ÖZET KUTULARI
 # --------------------------------------------------
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4 = st.columns(4, gap="medium")
 
 c1.metric(
     "Son kapanış",
@@ -460,16 +487,17 @@ c4.metric(
     signal
 )
 
-st.subheader("Sinyal Analizi ve Gerekçesi")
+st.subheader("Sinyal analizi ve gerekçesi")
 st.caption(
     "Puan; EMA trendi, fiyatın hızlı EMA'ya göre konumu ve RSI momentumu üzerinden hesaplanır. "
     "Bu kurallar test edilmeden kârlı kabul edilmemelidir."
 )
-st.dataframe(
-    pd.DataFrame(analysis_rows),
-    hide_index=True,
-    use_container_width=True
-)
+with st.container(border=True):
+    st.dataframe(
+        pd.DataFrame(analysis_rows),
+        hide_index=True,
+        use_container_width=True
+    )
 
 if signal == "AL eğilimi":
     st.info("AL yönünde en az iki teknik koşul destek veriyor. İşlem garantisi değildir.")
@@ -478,7 +506,7 @@ elif signal == "SAT eğilimi":
 else:
     st.info("Koşullar yeterince aynı yönde değil; sistem NÖTR kalıyor.")
 
-st.subheader("Risk ve Kâr Hedefleri")
+st.subheader("Risk yönetimi ve kâr hedefleri")
 if risk_levels is None:
     st.info(
         "ATR henüz hesaplanamadı veya sinyal nötr. "
@@ -489,7 +517,7 @@ else:
         f"Referans giriş: son kapanış • Stop mesafesi: {risk_multiple:.1f} × ATR(14) "
         "• Seviyeler otomatik işlem emri değildir."
     )
-    risk_cols = st.columns(5)
+    risk_cols = st.columns(5, gap="small")
     risk_cols[0].metric("Giriş referansı", f"${risk_levels['Giriş referansı']:,.2f}")
     risk_cols[1].metric("Stop-loss", f"${risk_levels['Stop-loss']:,.2f}")
     risk_cols[2].metric("Hedef 1 (1:1)", f"${risk_levels['Hedef 1 (1:1)']:,.2f}")
@@ -505,7 +533,8 @@ st.caption(
 # --------------------------------------------------
 # GRAFİK
 # --------------------------------------------------
-st.subheader("XAU/USD Mum Grafiği")
+st.subheader("Fiyat grafiği")
+st.caption("Mumlar ve EMA çizgileri · Grafiği yakınlaştırmak için sürükleyin, varsayılan görünüme dönmek için çift tıklayın.")
 
 fig = go.Figure()
 
@@ -539,11 +568,17 @@ fig.add_trace(
 )
 
 fig.update_layout(
-    height=600,
+    height=580,
     xaxis_rangeslider_visible=False,
     template="plotly_dark",
-    margin=dict(l=10, r=10, t=30, b=10),
-    legend=dict(orientation="h")
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(11,18,32,0.55)",
+    margin=dict(l=12, r=12, t=36, b=12),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+    font=dict(color="#c8d5e8"),
+    xaxis=dict(gridcolor="rgba(120,145,180,0.12)", zerolinecolor="rgba(120,145,180,0.15)"),
+    yaxis=dict(gridcolor="rgba(120,145,180,0.12)", zerolinecolor="rgba(120,145,180,0.15)"),
+    hovermode="x unified"
 )
 
 st.plotly_chart(fig, use_container_width=True)
@@ -554,7 +589,7 @@ st.plotly_chart(fig, use_container_width=True)
 left, right = st.columns(2)
 
 with left:
-    st.subheader("RSI")
+    st.subheader("RSI · Momentum")
 
     rsi_fig = go.Figure()
 
@@ -573,7 +608,13 @@ with left:
     rsi_fig.update_layout(
         height=300,
         yaxis_range=[0, 100],
-        template="plotly_dark"
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(11,18,32,0.55)",
+        margin=dict(l=10, r=10, t=20, b=10),
+        font=dict(color="#c8d5e8"),
+        xaxis=dict(gridcolor="rgba(120,145,180,0.12)"),
+        yaxis=dict(gridcolor="rgba(120,145,180,0.12)")
     )
 
     st.plotly_chart(
@@ -582,7 +623,7 @@ with left:
     )
 
 with right:
-    st.subheader("Volatilite")
+    st.subheader("Volatilite · ATR")
 
     if pd.notna(atr):
         st.metric("ATR (14)", f"${float(atr):.2f}")
@@ -596,7 +637,7 @@ with right:
 # --------------------------------------------------
 # SON MUM VERİLERİ
 # --------------------------------------------------
-with st.expander("Son mum verilerini görüntüle"):
+with st.expander("Ham veriler · Son 20 mum"):
     display_cols = [
         "open",
         "high",
@@ -618,7 +659,5 @@ with st.expander("Son mum verilerini görüntüle"):
 st.divider()
 
 st.caption(
-    "Bu uygulama basit teknik göstergeler kullanır. "
-    "Komisyon, spread, kayma ve işlem yürütme koşulları "
-    "hesaplanmaz. Tek başına alım-satım kararı için kullanılmamalıdır."
+    "Bilgilendirme: Bu uygulama basit teknik göstergeler kullanır. Komisyon, spread, kayma ve işlem yürütme koşulları hesaplanmaz. Tek başına alım-satım kararı için kullanılmamalıdır."
 )
