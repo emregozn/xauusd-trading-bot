@@ -285,6 +285,7 @@ if data is None or data.empty:
     st.error("Gösterilecek veri bulunamadı.")
     st.stop()
 
+
 last_time = data.index[-1]
 now_utc = pd.Timestamp.now(tz="UTC")
 
@@ -293,15 +294,14 @@ if last_time.tzinfo is None:
 else:
     last_time = last_time.tz_convert("UTC")
 
-age_hours = (
-    now_utc - last_time
-).total_seconds() / 3600
+age_hours = (now_utc - last_time).total_seconds() / 3600
 
 max_age = {
     "1h": 3,
     "4h": 6,
     "1day": 36
-}[interval]
+}.get(interval, 6)
+
 
 if mode == "Twelve Data API":
     if age_hours < 0:
