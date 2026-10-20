@@ -98,10 +98,10 @@ def get_live_data(api_key, interval):
         )
         raise ValueError(str(message))
     
-    st.write("API zaman dilimi:", result.get("meta", {}).get("exchange_timezone", "bilinmiyor"))
+    
     data = pd.DataFrame(result["values"])
-    st.write("API ham zaman:", result["values"][0]["datetime"])
-    st.write("API zaman dilimi:", result.get("meta", {}).get("exchange_timezone", "bilinmiyor"))
+    
+    
     if data.empty:
         raise ValueError("API boş veri döndürdü.")
 
