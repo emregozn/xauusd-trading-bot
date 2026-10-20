@@ -16,10 +16,23 @@ st.warning(
     "gerçek veriyle çalışırken bile sinyalleri sanal işlem ve geçmiş testlerle doğrulayın."
 )
 
+
 with st.sidebar:
     st.header("Veri kaynağı")
+
     if "calisma_modu" not in st.session_state:
-    st.session_state["calisma_modu"] = "Demo veri"
+        st.session_state["calisma_modu"] = "Demo veri"
+
+    mode = st.radio(
+        "Çalışma modu",
+        ["Demo veri", "Twelve Data API"],
+        index=["Demo veri", "Twelve Data API"].index(
+            st.session_state["calisma_modu"]
+        ),
+        key="calisma_modu"
+    )
+
+    
 
 mode = st.radio(
     "Çalışma modu",
