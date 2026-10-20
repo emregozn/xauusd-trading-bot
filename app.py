@@ -19,7 +19,7 @@ st.warning(
 with st.sidebar:
     st.header("Veri kaynağı")
     mode = st.radio("Çalışma modu", ["Demo veri", "Twelve Data API"], index=0)
-    api_key = ""
+    api_key = api_key = st.secrets.get("TWELVE_DATA_API_KEY", "")
     if mode == "Twelve Data API":
         api_key = st.text_input("Twelve Data API anahtarı", type="password")
         st.caption("Anahtar bu oturumda kullanılır; koda yazmayın veya paylaşmayın.")
