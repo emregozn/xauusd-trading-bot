@@ -20,8 +20,24 @@ st.markdown("""
   .stApp { background: radial-gradient(ellipse at top left, #17243b 0%, #0b1220 42%, #080d17 100%); color: #e7edf7; }
   [data-testid="stSidebar"] { background: linear-gradient(180deg, #101a2b 0%, #0b1220 100%); border-right: 1px solid #26344a; }
   [data-testid="stMetric"] { background: linear-gradient(145deg, rgba(25,39,61,.95), rgba(14,24,40,.95)); border: 1px solid #2a3a52; padding: 16px 18px; border-radius: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.16); }
-  [data-testid="stMetricLabel"] { color: #9fb0c9 !important; }
-  [data-testid="stMetricValue"] { color: #f4f7fc !important; }
+  [data-testid="stMetricLabel"] { color: #c4d2e6 !important; font-weight: 650 !important; }
+  [data-testid="stMetricValue"] { color: #ffffff !important; font-weight: 750 !important; }
+  [data-testid="stMetricDelta"] { color: #d8e5f5 !important; }
+  [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li { color: #d9e4f3; }
+  label, [data-testid="stCaptionContainer"] { color: #b6c6dc !important; }
+  [data-testid="stSelectbox"] label, [data-testid="stRadio"] label, [data-testid="stSlider"] label { color: #e1eafa !important; }
+  .signal-card { padding: 20px; border-radius: 16px; border: 1px solid #40516a; background: linear-gradient(145deg, #17263b, #101a2b); min-height: 170px; }
+  .signal-card.buy { border-top: 4px solid #35d39a; }
+  .signal-card.sell { border-top: 4px solid #ff647c; }
+  .signal-card.neutral { border-top: 4px solid #f3c969; }
+  .signal-eyebrow { color: #c0cee2; font-size: 12px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+  .signal-head { font-size: 27px; line-height: 1.2; font-weight: 800; margin: 8px 0 10px; }
+  .signal-body { color: #d5e0ef; font-size: 14px; line-height: 1.55; }
+  .reason-list { background: #101a2b; border: 1px solid #354760; border-radius: 14px; padding: 16px 18px; }
+  .reason-list ul { margin: 8px 0 0 18px; padding: 0; }
+  .reason-list li { margin: 7px 0; color: #e0e9f5; }
+  .mini-label { color: #b9c9de; font-size: 13px; font-weight: 700; }
+  .small-note { color: #b6c6dc; font-size: 12px; line-height: 1.45; }
   h1, h2, h3 { letter-spacing: -0.025em; }
   h1 { color: #f6f8fc; }
   h2, h3 { color: #dbe7f8; }
@@ -423,6 +439,42 @@ analysis_rows = [
     },
 ]
 
+# Görsel özet için her kriterin hangi yönü desteklediğini say.
+# Yüzdeler olasılık veya yatırım tavsiyesi değil, üç teknik kriterin uyum oranıdır.
+buy_reasons = []
+sell_reasons = []
+neutral_reasons = []
+
+if trend_up:
+    buy_reasons.append(f"EMA {ema_fast}, EMA {ema_slow} üzerinde: kısa vadeli trend yukarı.")
+elif trend_down:
+    sell_reasons.append(f"EMA {ema_fast}, EMA {ema_slow} altında: kısa vadeli trend aşağı.")
+else:
+    neutral_reasons.append("EMA'lar birbirine yakın; trend ayrımı zayıf.")
+
+if price_above_fast:
+    buy_reasons.append("Son kapanış hızlı EMA'nın üzerinde.")
+elif price_below_fast:
+    sell_reasons.append("Son kapanış hızlı EMA'nın altında.")
+else:
+    neutral_reasons.append("Fiyat hızlı EMA çevresinde.")
+
+if rsi_rising and 40 <= rsi <= 70:
+    buy_reasons.append(f"RSI {rsi:.1f}: momentum yükseliyor ve aşırı alım bölgesinde değil.")
+elif rsi_falling and 30 <= rsi <= 60:
+    sell_reasons.append(f"RSI {rsi:.1f}: momentum aşağı yönlü.")
+elif rsi >= 70:
+    neutral_reasons.append(f"RSI {rsi:.1f}: yüksek momentum var; yeni girişte geri çekilme riski olabilir.")
+elif rsi <= 30:
+    neutral_reasons.append(f"RSI {rsi:.1f}: zayıf/aşırı satım bölgesi; tek başına AL sinyali değildir.")
+else:
+    neutral_reasons.append(f"RSI {rsi:.1f}: momentum filtresi net yön desteği vermiyor.")
+
+buy_support = len(buy_reasons)
+sell_support = len(sell_reasons)
+buy_pct = round(buy_support / 3 * 100)
+sell_pct = round(sell_support / 3 * 100)
+
 # --------------------------------------------------
 # RİSK / HEDEF SEVİYELERİ (ATR TABANLI)
 # --------------------------------------------------
@@ -487,24 +539,50 @@ c4.metric(
     signal
 )
 
-st.subheader("Sinyal analizi ve gerekçesi")
-st.caption(
-    "Puan; EMA trendi, fiyatın hızlı EMA'ya göre konumu ve RSI momentumu üzerinden hesaplanır. "
-    "Bu kurallar test edilmeden kârlı kabul edilmemelidir."
-)
-with st.container(border=True):
-    st.dataframe(
-        pd.DataFrame(analysis_rows),
-        hide_index=True,
-        use_container_width=True
-    )
+st.subheader("Sinyal analizi")
+st.caption("Yön desteği yüzdeleri, 3 teknik kriterden kaçının aynı yönü desteklediğini gösterir; kazanma olasılığı değildir.")
 
 if signal == "AL eğilimi":
-    st.info("AL yönünde en az iki teknik koşul destek veriyor. İşlem garantisi değildir.")
+    card_class, signal_color = "buy", "#56e0ad"
 elif signal == "SAT eğilimi":
-    st.info("SAT yönünde en az iki teknik koşul destek veriyor. İşlem garantisi değildir.")
+    card_class, signal_color = "sell", "#ff8193"
 else:
-    st.info("Koşullar yeterince aynı yönde değil; sistem NÖTR kalıyor.")
+    card_class, signal_color = "neutral", "#f3d27c"
+
+signal_cols = st.columns([1.05, 1.5], gap="large")
+with signal_cols[0]:
+    st.markdown(
+        f'<div class="signal-card {card_class}">'
+        f'<div class="signal-eyebrow">Mevcut teknik görünüm</div>'
+        f'<div class="signal-head" style="color:{signal_color}">{signal}</div>'
+        f'<div class="signal-body">Sinyal puanı: <b>{score:+d} / 3</b><br>Son kapanış: <b>${price:,.2f}</b><br>RSI: <b>{rsi:.1f}</b></div>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
+with signal_cols[1]:
+    st.markdown('<div class="mini-label">Teknik kriterlerin yön uyumu</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="mini-label" style="color:#56e0ad">AL yönü desteği · {buy_pct}% ({buy_support}/3 kriter)</div>', unsafe_allow_html=True)
+    st.progress(buy_pct / 100)
+    st.markdown(f'<div class="mini-label" style="color:#ff8193">SAT yönü desteği · {sell_pct}% ({sell_support}/3 kriter)</div>', unsafe_allow_html=True)
+    st.progress(sell_pct / 100)
+    st.markdown('<div class="small-note">Bu göstergeler istatistiksel başarı ihtimali değildir; yalnızca mevcut kurallarla uyumu özetler.</div>', unsafe_allow_html=True)
+
+reason_cols = st.columns(2, gap="large")
+with reason_cols[0]:
+    st.markdown('<div class="reason-list"><b style="color:#56e0ad">🟢 AL yönünü destekleyenler</b><ul>' + ''.join(f'<li>{r}</li>' for r in buy_reasons) + ('' if buy_reasons else '<li>Şu anda AL yönünü destekleyen net kriter yok.</li>') + '</ul></div>', unsafe_allow_html=True)
+with reason_cols[1]:
+    st.markdown('<div class="reason-list"><b style="color:#ff8193">🔴 SAT yönünü destekleyenler</b><ul>' + ''.join(f'<li>{r}</li>' for r in sell_reasons) + ('' if sell_reasons else '<li>Şu anda SAT yönünü destekleyen net kriter yok.</li>') + '</ul></div>', unsafe_allow_html=True)
+
+with st.expander("Nötr kalan / dikkat edilmesi gereken noktalar"):
+    for reason in neutral_reasons:
+        st.markdown(f"- {reason}")
+
+if signal == "AL eğilimi":
+    st.success("En az iki teknik kriter AL yönünü destekliyor. Bu bir emir değildir; risk ve veri kalitesi ayrıca değerlendirilmelidir.")
+elif signal == "SAT eğilimi":
+    st.error("En az iki teknik kriter SAT yönünü destekliyor. Bu bir emir değildir; risk ve veri kalitesi ayrıca değerlendirilmelidir.")
+else:
+    st.warning("Teknik kriterler aynı yönde yeterince birleşmiyor; sistem NÖTR kalıyor.")
 
 st.subheader("Risk yönetimi ve kâr hedefleri")
 if risk_levels is None:
@@ -554,7 +632,8 @@ fig.add_trace(
         x=data.index,
         y=data["EMA_fast"],
         mode="lines",
-        name=f"EMA {ema_fast}"
+        name=f"EMA {ema_fast}",
+        line=dict(color="#42d6a4", width=2)
     )
 )
 
@@ -563,7 +642,8 @@ fig.add_trace(
         x=data.index,
         y=data["EMA_slow"],
         mode="lines",
-        name=f"EMA {ema_slow}"
+        name=f"EMA {ema_slow}",
+        line=dict(color="#ffbf69", width=2)
     )
 )
 
@@ -598,7 +678,8 @@ with left:
             x=data.index,
             y=data["RSI"],
             mode="lines",
-            name="RSI"
+            name="RSI",
+            line=dict(color="#7eb6ff", width=2)
         )
     )
 
