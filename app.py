@@ -36,7 +36,7 @@ with st.sidebar:
         index=0,
         key="calisma_modu"
     )
-
+        st.write("Seçili kaynak:", mode)
     interval = st.selectbox(
         "Mum aralığı",
         ["1h", "4h", "1day"],
