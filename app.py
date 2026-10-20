@@ -636,8 +636,9 @@ c2.metric(
 )
 
 c3.metric(
-    "Sinyal puanı",
-    f"{score:+d} / 3"
+    "Yön puanı",
+    f"{score:+d} / 3",
+    "3 teknik kriterin toplamı"
 )
 
 c4.metric(
@@ -646,7 +647,7 @@ c4.metric(
 )
 
 st.subheader("Sinyal analizi")
-st.caption("Yön desteği yüzdeleri, 3 teknik kriterden kaçının aynı yönü desteklediğini gösterir; kazanma olasılığı değildir.")
+st.caption("Yön puanı, üç basit kontrolün toplamıdır: EMA trendi (+1/−1), fiyatın hızlı EMA üstünde/altında olması (+1/−1) ve RSI momentumu (+1/−1). Pozitif puan yukarı, negatif puan aşağı eğilimi anlatır; başarı olasılığı veya garanti değildir.")
 
 if signal == "AL eğilimi":
     card_class, signal_color = "buy", "#56e0ad"
@@ -661,7 +662,7 @@ with signal_cols[0]:
         f'<div class="signal-card {card_class}">'
         f'<div class="signal-eyebrow">Mevcut teknik görünüm</div>'
         f'<div class="signal-head" style="color:{signal_color}">{signal}</div>'
-        f'<div class="signal-body">Sinyal puanı: <b>{score:+d} / 3</b><br>Son kapanış: <b>${price:,.2f}</b><br>RSI: <b>{rsi:.1f}</b></div>'
+        f'<div class="signal-body">Yön puanı: <b>{score:+d} / 3</b> (EMA trendi, fiyat konumu ve RSI momentumu)<br>Son kapanış: <b>${price:,.2f}</b><br>RSI: <b>{rsi:.1f} / 100</b></div>'
         f'</div>',
         unsafe_allow_html=True
     )
@@ -720,10 +721,10 @@ st.caption(
 st.subheader("Piyasa yapısı ve işlem planı")
 mc1, mc2, mc3, mc4 = st.columns(4, gap="medium")
 mc1.metric("Piyasa rejimi", regime_name)
-mc2.metric("Son 50 mum desteği", f"${support:,.2f}")
-mc3.metric("Son 50 mum direnci", f"${resistance:,.2f}")
+mc2.metric("Yakın destek", f"${support:,.2f}")
+mc3.metric("Yakın direnç", f"${resistance:,.2f}")
 mc4.metric("ATR / fiyat", f"{(float(atr) / price * 100):.2f}%" if pd.notna(atr) and price else "—")
-st.caption(regime_detail + " Destek/direnç seviyeleri son mumların en düşük/en yüksek değerlerinden yaklaşık olarak çıkarılmıştır; kesin seviye değildir.")
+st.caption(regime_detail + " Destek/direnç, geçmiş mumlardaki dönüş noktalarından türetilen yaklaşık fiyat bölgeleridir; kesin veya değişmez seviyeler değildir.")
 
 with st.expander("Pozisyon büyüklüğü hesaplayıcı", expanded=False):
     st.write(f"Hesap büyüklüğü: **${account_size:,.2f}** · İşlem başına risk bütçesi: **${position_risk_dollars:,.2f}** ({risk_pct:.1f}%).")
@@ -766,6 +767,7 @@ if enable_mtf:
 
 st.subheader("Geçmiş performans · Backtest")
 st.caption(f"Basit test: sinyal mum kapanışında oluşur, sonraki mum açılışından giriş varsayılır ve {backtest_holding} mum sonra kapanışta çıkılır. İşlem maliyeti yaklaşık olarak düşülür; stop/limit yürütmesi simüle edilmez.")
+st.info("Bu bölüm senin hesabının gerçek geçmiş performansı değil. Uygulama, seçili grafikteki geçmiş mumlara basit bir kural uygulayıp 'geçmişte bu kuralla işlem yapılsaydı ne olurdu?' diye simüle eder. Gerçek emirlerini, hesabını veya broker geçmişini okumaz; sonuçlar gelecekteki kazancı garanti etmez.")
 try:
     bt_trades, bt_equity, bt_stats = run_backtest(data, ema_fast, ema_slow, int(backtest_holding), float(backtest_cost_bps))
     if not bt_stats:
@@ -815,8 +817,8 @@ if enable_alerts:
 # --------------------------------------------------
 # GRAFİK
 # --------------------------------------------------
-st.subheader("Fiyat grafiği")
-st.caption("Mumlar ve EMA çizgileri · Grafiği yakınlaştırmak için sürükleyin, varsayılan görünüme dönmek için çift tıklayın.")
+st.subheader("Fiyat grafiği: destek ve direnç seviyeleri")
+st.caption("Yeşil kesikli çizgiler destek (fiyatın düşüşte tutunabileceği bölgeler), kırmızı kesikli çizgiler direnç (fiyatın yükselişte zorlanabileceği bölgeler). Turkuaz/turuncu çizgiler EMA trend göstergeleridir. Seviyeler seçili veri setindeki son 50 mumdan hesaplanır.")
 
 fig = go.Figure()
 
@@ -851,6 +853,37 @@ fig.add_trace(
     )
 )
 
+# Grafikte net görülebilen yatay destek/direnç çizgileri (son 50 mum).
+level_window = data.tail(min(50, len(data)))
+# Yerel dipler/tepelerden seviye adayları; en yakın seviyeler seçilir.
+low_vals = level_window["low"].to_numpy(dtype=float)
+high_vals = level_window["high"].to_numpy(dtype=float)
+close_vals = level_window["close"].to_numpy(dtype=float)
+low_pivots = [float(low_vals[i]) for i in range(2, len(low_vals)-2) if low_vals[i] <= min(low_vals[i-2:i+3])]
+high_pivots = [float(high_vals[i]) for i in range(2, len(high_vals)-2) if high_vals[i] >= max(high_vals[i-2:i+3])]
+# Fiyatın altındaki en yakın iki farklı destek, üstündeki en yakın iki farklı direnç.
+def distinct_levels(values, current, below=True, tolerance=0.0015):
+    candidates = sorted([v for v in values if (v < current if below else v > current)], reverse=below)
+    chosen = []
+    for v in candidates:
+        if all(abs(v-u) / max(abs(u), 1e-9) > tolerance for u in chosen):
+            chosen.append(v)
+        if len(chosen) == 2:
+            break
+    return chosen
+
+support_levels = distinct_levels(low_pivots + [support], price, below=True)
+resistance_levels = distinct_levels(high_pivots + [resistance], price, below=False)
+# Eğer fiyat yeni zirve/dipteyse en yakın görünür sınırı yine göster.
+if not support_levels and support < price:
+    support_levels = [support]
+if not resistance_levels and resistance > price:
+    resistance_levels = [resistance]
+for i, level in enumerate(support_levels):
+    fig.add_hline(y=level, line_dash="dash", line_color="#45d6a5", line_width=2, annotation_text=f"DESTEK {i+1}  ${level:,.2f}", annotation_position="bottom right", annotation_font_color="#45d6a5")
+for i, level in enumerate(resistance_levels):
+    fig.add_hline(y=level, line_dash="dash", line_color="#ff7185", line_width=2, annotation_text=f"DİRENÇ {i+1}  ${level:,.2f}", annotation_position="top right", annotation_font_color="#ff7185")
+
 fig.update_layout(
     height=580,
     xaxis_rangeslider_visible=False,
@@ -873,7 +906,8 @@ st.plotly_chart(fig, use_container_width=True)
 left, right = st.columns(2)
 
 with left:
-    st.subheader("RSI · Momentum")
+    st.subheader("RSI · Momentum ve bölgeler")
+    st.caption("RSI fiyat grafiğindeki destek/direnç değildir; momentum göstergesidir. 30 altı zayıf/aşırı satım, 50 orta çizgi, 70 üstü güçlü/aşırı alım bölgesi olarak izlenir. Bu yatay eşikler fiyat seviyesi değil RSI puanıdır.")
 
     rsi_fig = go.Figure()
 
@@ -887,8 +921,9 @@ with left:
         )
     )
 
-    rsi_fig.add_hline(y=70, line_dash="dash")
-    rsi_fig.add_hline(y=30, line_dash="dash")
+    rsi_fig.add_hline(y=70, line_dash="dash", line_color="#ff7185", annotation_text="70 · yüksek/aşırı alım", annotation_position="top left")
+    rsi_fig.add_hline(y=50, line_dash="dot", line_color="#9aa9bd", annotation_text="50 · orta çizgi", annotation_position="bottom left")
+    rsi_fig.add_hline(y=30, line_dash="dash", line_color="#45d6a5", annotation_text="30 · düşük/aşırı satım", annotation_position="bottom left")
 
     rsi_fig.update_layout(
         height=300,
