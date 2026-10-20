@@ -1,4 +1,5 @@
 
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -372,6 +373,38 @@ else:
     signal = "NÖTR"
 
 # --------------------------------------------------
+# RİSK / HEDEF SEVİYELERİ (ATR TABANLI)
+# --------------------------------------------------
+# Bu seviyeler analiz amaçlıdır; işlem emri göndermez.
+risk_multiple = 1.5
+risk_levels = None
+
+if pd.notna(atr) and float(atr) > 0:
+    entry_price = price
+    risk_distance = float(atr) * risk_multiple
+
+    if signal == "AL eğilimi":
+        risk_levels = {
+            "Yön": "AL",
+            "Giriş referansı": entry_price,
+            "Stop-loss": entry_price - risk_distance,
+            "Hedef 1 (1:1)": entry_price + risk_distance,
+            "Hedef 2 (1:2)": entry_price + (2 * risk_distance),
+            "Hedef 3 (1:3)": entry_price + (3 * risk_distance),
+            "Risk mesafesi": risk_distance,
+        }
+    elif signal == "SAT eğilimi":
+        risk_levels = {
+            "Yön": "SAT",
+            "Giriş referansı": entry_price,
+            "Stop-loss": entry_price + risk_distance,
+            "Hedef 1 (1:1)": entry_price - risk_distance,
+            "Hedef 2 (1:2)": entry_price - (2 * risk_distance),
+            "Hedef 3 (1:3)": entry_price - (3 * risk_distance),
+            "Risk mesafesi": risk_distance,
+        }
+
+# --------------------------------------------------
 # ÖZET KUTULARI
 # --------------------------------------------------
 c1, c2, c3, c4 = st.columns(4)
@@ -396,6 +429,24 @@ c4.metric(
     "Teknik görünüm",
     signal
 )
+
+st.subheader("Risk ve Kâr Hedefleri")
+if risk_levels is None:
+    st.info(
+        "ATR henüz hesaplanamadı veya sinyal nötr. "
+        "Bu nedenle yönlü stop-loss/kâr hedefi gösterilmiyor."
+    )
+else:
+    st.caption(
+        f"Referans giriş: son kapanış • Stop mesafesi: {risk_multiple:.1f} × ATR(14) "
+        "• Seviyeler otomatik işlem emri değildir."
+    )
+    risk_cols = st.columns(5)
+    risk_cols[0].metric("Giriş referansı", f"${risk_levels['Giriş referansı']:,.2f}")
+    risk_cols[1].metric("Stop-loss", f"${risk_levels['Stop-loss']:,.2f}")
+    risk_cols[2].metric("Hedef 1 (1:1)", f"${risk_levels['Hedef 1 (1:1)']:,.2f}")
+    risk_cols[3].metric("Hedef 2 (1:2)", f"${risk_levels['Hedef 2 (1:2)']:,.2f}")
+    risk_cols[4].metric("Hedef 3 (1:3)", f"${risk_levels['Hedef 3 (1:3)']:,.2f}")
 
 st.caption(
     f"Veri kaynağı: {mode} • "
