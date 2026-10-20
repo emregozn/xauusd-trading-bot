@@ -303,19 +303,28 @@ max_age = {
 }.get(interval, 6)
 
 
+
 if mode == "Twelve Data API":
-    if age_hours < 0:
-        st.error("Veri zaman damgası gelecekte görünüyor.")
+    st.caption(
+        f"API mum zamanı: {last_time.strftime('%Y-%m-%d %H:%M:%S %Z')} | "
+        f"Şu an UTC: {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')} | "
+        f"Fark: {age_hours:.2f} saat"
+    )
+
+    if age_hours < -0.1:
+        st.error(
+            "API mum zamanı gelecekte görünüyor. "
+            "Saat bilgisi doğrulanmadan sinyali kullanma."
+        )
     elif age_hours > max_age:
         st.error(
-            f"VERİ ESKİ: Son mum {age_hours:.1f} saat önce. "
-            "Sinyali güvenilir kabul etme."
+            f"Veri eski: Son mum {age_hours:.1f} saat önce."
         )
     else:
         st.success(
-            f"Veri güncellik kontrolü geçti • "
-            f"Son mum {age_hours:.1f} saat önce"
+            f"Veri güncellik kontrolü geçti: {age_hours:.1f} saat."
         )
+
 
 # --------------------------------------------------
 # ANALİZ
