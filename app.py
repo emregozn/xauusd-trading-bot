@@ -97,7 +97,8 @@ def get_live_data(api_key, interval):
             result.get("code", "Bilinmeyen API hatası")
         )
         raise ValueError(str(message))
-
+    st.write("API ham zaman:", result["values"][0]["datetime"])
+    st.write("API zaman dilimi:", result.get("meta", {}).get("exchange_timezone", "bilinmiyor"))
     data = pd.DataFrame(result["values"])
     st.write("API ham zaman:", result["values"][0]["datetime"])
     st.write("API zaman dilimi:", result.get("meta", {}).get("exchange_timezone", "bilinmiyor"))
