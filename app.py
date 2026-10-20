@@ -348,21 +348,32 @@ atr = last["ATR"]
 ema_f = float(last["EMA_fast"])
 ema_s = float(last["EMA_slow"])
 
+# Sinyal bileşenleri: trend, fiyat konumu ve RSI momentumu.
+# RSI'nin yalnızca 30 altı / 70 üstü olması tek başına yön sinyali sayılmaz.
+prev_rsi = float(previous["RSI"])
+
+trend_up = ema_f > ema_s
+trend_down = ema_f < ema_s
+price_above_fast = price > ema_f
+price_below_fast = price < ema_f
+rsi_rising = rsi > prev_rsi
+rsi_falling = rsi < prev_rsi
+
 score = 0
-
-if ema_f > ema_s:
+if trend_up:
     score += 1
-elif ema_f < ema_s:
+elif trend_down:
     score -= 1
 
-if price > ema_f:
+if price_above_fast:
     score += 1
-elif price < ema_f:
+elif price_below_fast:
     score -= 1
 
-if rsi < 30:
+# Momentum katkısı için RSI yönü ve aşırı bölge birlikte değerlendirilir.
+if rsi_rising and 40 <= rsi <= 70:
     score += 1
-elif rsi > 70:
+elif rsi_falling and 30 <= rsi <= 60:
     score -= 1
 
 if score >= 2:
@@ -371,6 +382,25 @@ elif score <= -2:
     signal = "SAT eğilimi"
 else:
     signal = "NÖTR"
+
+# Kullanıcıya kararın hangi koşullardan geldiğini açıkla.
+analysis_rows = [
+    {
+        "Kriter": "Trend (EMA)",
+        "Durum": "Yükseliş" if trend_up else ("Düşüş" if trend_down else "Nötr"),
+        "Yorum": f"EMA {ema_fast}: ${ema_f:,.2f} | EMA {ema_slow}: ${ema_s:,.2f}",
+    },
+    {
+        "Kriter": "Fiyat konumu",
+        "Durum": "Hızlı EMA üzerinde" if price_above_fast else ("Hızlı EMA altında" if price_below_fast else "EMA ile aynı"),
+        "Yorum": f"Kapanış: ${price:,.2f}",
+    },
+    {
+        "Kriter": "RSI momentumu",
+        "Durum": "Yükseliyor" if rsi_rising else ("Düşüyor" if rsi_falling else "Değişmedi"),
+        "Yorum": f"RSI: {rsi:.1f} | Önceki: {prev_rsi:.1f}",
+    },
+]
 
 # --------------------------------------------------
 # RİSK / HEDEF SEVİYELERİ (ATR TABANLI)
@@ -429,6 +459,24 @@ c4.metric(
     "Teknik görünüm",
     signal
 )
+
+st.subheader("Sinyal Analizi ve Gerekçesi")
+st.caption(
+    "Puan; EMA trendi, fiyatın hızlı EMA'ya göre konumu ve RSI momentumu üzerinden hesaplanır. "
+    "Bu kurallar test edilmeden kârlı kabul edilmemelidir."
+)
+st.dataframe(
+    pd.DataFrame(analysis_rows),
+    hide_index=True,
+    use_container_width=True
+)
+
+if signal == "AL eğilimi":
+    st.info("AL yönünde en az iki teknik koşul destek veriyor. İşlem garantisi değildir.")
+elif signal == "SAT eğilimi":
+    st.info("SAT yönünde en az iki teknik koşul destek veriyor. İşlem garantisi değildir.")
+else:
+    st.info("Koşullar yeterince aynı yönde değil; sistem NÖTR kalıyor.")
 
 st.subheader("Risk ve Kâr Hedefleri")
 if risk_levels is None:
