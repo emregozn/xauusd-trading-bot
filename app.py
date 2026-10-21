@@ -10,10 +10,323 @@ from datetime import datetime, timezone
 # SAYFA AYARLARI
 # --------------------------------------------------
 st.set_page_config(
-    page_title="XAU/USD Trading Dashboard",
+    page_title="Market Intelligence Dashboard",
     page_icon="📈",
     layout="wide"
 )
+
+# Uygulama içi bölüm seçimi: yeni tarayıcı sekmesi açmaz.
+with st.sidebar:
+    st.markdown("## 🧭 Piyasa seçimi")
+    market_page = st.radio(
+        "Analiz alanı",
+        ["🥇 XAU/USD · Altın", "🇹🇷 BIST · Hisseler"],
+        index=0,
+        key="market_page_selector",
+    )
+
+if market_page == "🇹🇷 BIST · Hisseler":
+    import concurrent.futures
+    from datetime import timedelta
+
+    st.markdown("""
+    <style>
+      .stApp { background: radial-gradient(ellipse at top left, #17243b 0%, #0b1220 42%, #080d17 100%); color: #e7edf7; }
+      [data-testid="stSidebar"] { background: linear-gradient(180deg, #101a2b 0%, #0b1220 100%); border-right: 1px solid #26344a; }
+      [data-testid="stMetric"] { background: linear-gradient(145deg, rgba(25,39,61,.95), rgba(14,24,40,.95)); border: 1px solid #2a3a52; padding: 14px; border-radius: 14px; }
+      [data-testid="stMetricLabel"] { color: #c4d2e6 !important; }
+      [data-testid="stMetricValue"] { color: #fff !important; }
+      h1,h2,h3 { color: #f1f5fb; }
+    </style>
+    <div style="padding:22px 24px;border:1px solid #2a3b54;border-radius:18px;background:linear-gradient(110deg,rgba(24,39,62,.96),rgba(13,22,37,.96));margin-bottom:18px">
+      <div style="color:#8ea9ce;font-size:12px;letter-spacing:.16em;font-weight:700">MARKET INTELLIGENCE · BORSA İSTANBUL</div>
+      <div style="color:#f5f8ff;font-size:30px;font-weight:750;margin-top:7px">BIST Hisse Analiz Merkezi</div>
+      <div style="color:#9fb0c9;font-size:14px;margin-top:8px">Fiyat hareketi, hacim, teknik görünüm ve şirket profili tek ekranda.</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Geniş tarama evreni. Endeks üyelikleri dönemsel değiştiğinden bu listeler
+    # resmi ve eksiksiz endeks bileşenleri olarak değil, düzenlenebilir tarama sepetleri olarak sunulur.
+    BIST_WATCHLIST = {
+        "AEFES": "Anadolu Efes · İçecek", "AGHOL": "Anadolu Grubu Holding · Holding",
+        "AKBNK": "Akbank · Bankacılık", "AKSA": "Aksa · Kimya ve elyaf", "AKSEN": "Aksa Enerji · Enerji",
+        "ALARK": "Alarko Holding · Holding/enerji", "ANHYT": "Anadolu Hayat Emeklilik · Sigorta",
+        "ARCLK": "Arçelik · Dayanıklı tüketim", "ASELS": "Aselsan · Savunma ve elektronik",
+        "ASTOR": "Astor Enerji · Enerji ekipmanları", "AYGAZ": "Aygaz · Enerji dağıtımı",
+        "BIMAS": "BİM · Perakende", "BRISA": "Brisa · Lastik", "CCOLA": "Coca-Cola İçecek · İçecek",
+        "CIMSA": "Çimsa · Çimento", "DOAS": "Doğuş Otomotiv · Otomotiv", "DOHOL": "Doğan Holding · Holding",
+        "ECILC": "Eczacıbaşı İlaç · Sağlık", "EGEEN": "Ege Endüstri · Otomotiv yan sanayi",
+        "EKGYO": "Emlak Konut GYO · Gayrimenkul", "ENJSA": "Enerjisa · Elektrik",
+        "ENKAI": "Enka İnşaat · İnşaat ve enerji", "EREGL": "Ereğli Demir Çelik · Çelik",
+        "FROTO": "Ford Otosan · Otomotiv", "GARAN": "Garanti BBVA · Bankacılık",
+        "GESAN": "Girişim Elektrik · Enerji ekipmanları", "GUBRF": "Gübre Fabrikaları · Gübre",
+        "HALKB": "Halkbank · Bankacılık", "ISCTR": "İş Bankası C · Bankacılık",
+        "ISDMR": "İskenderun Demir Çelik · Çelik", "KARSN": "Karsan · Ticari araçlar",
+        "KCHOL": "Koç Holding · Holding", "KONTR": "Kontrolmatik · Enerji teknolojileri",
+        "KONYA": "Konya Çimento · Çimento", "KOZAA": "Koza Anadolu Metal · Madencilik",
+        "KOZAL": "Koza Altın · Madencilik", "KRDMD": "Kardemir D · Demir çelik",
+        "MAVI": "Mavi Giyim · Perakende", "MGROS": "Migros · Perakende", "MIATK": "Mia Teknoloji · Teknoloji",
+        "ODAS": "Odaş Elektrik · Enerji", "OTKAR": "Otokar · Savunma ve ticari araç",
+        "OYAKC": "Oyak Çimento · Çimento", "PASEU": "Pasifik Eurasia · Lojistik",
+        "PETKM": "Petkim · Petrokimya", "PGSUS": "Pegasus · Havacılık", "SAHOL": "Sabancı Holding · Holding",
+        "SASA": "SASA · Polyester ve kimya", "SISE": "Şişecam · Cam ve kimyasallar",
+        "SOKM": "Şok Marketler · Perakende", "TAVHL": "TAV Havalimanları · Havalimanı işletmeciliği",
+        "TCELL": "Turkcell · Telekomünikasyon", "THYAO": "Türk Hava Yolları · Havacılık",
+        "TKFEN": "Tekfen Holding · İnşaat ve tarım", "TOASO": "Tofaş · Otomotiv",
+        "TRMET": "TR Anadolu Metal Madencilik · Madencilik", "TTKOM": "Türk Telekom · Telekomünikasyon",
+        "TTRAK": "Türk Traktör · Tarım makineleri", "TUPRS": "Tüpraş · Rafineri",
+        "TURSG": "Türkiye Sigorta · Sigorta", "ULKER": "Ülker · Gıda", "VAKBN": "VakıfBank · Bankacılık",
+        "VESBE": "Vestel Beyaz Eşya · Dayanıklı tüketim", "VESTL": "Vestel · Elektronik",
+        "YKBNK": "Yapı Kredi · Bankacılık", "ZOREN": "Zorlu Enerji · Enerji",
+        "AKFGY": "Akfen GYO · Gayrimenkul", "AKFYE": "Akfen Yenilenebilir Enerji · Enerji",
+        "ALBRK": "Albaraka Türk · Bankacılık", "ALFAS": "Alfa Solar Enerji · Güneş enerjisi",
+        "ANSGR": "Anadolu Sigorta · Sigorta", "ARDYZ": "Ard Grup Bilişim · Yazılım",
+        "ATATP": "ATP Yazılım · Yazılım", "BAGFS": "Bagfaş · Gübre", "BANVT": "Banvit · Gıda",
+        "BERA": "Bera Holding · Holding", "BIOEN": "Biotrend Enerji · Atık/enerji",
+        "BRSAN": "Borusan Boru · Sanayi", "BTCIM": "Batıçim · Çimento", "CWENE": "CW Enerji · Güneş enerjisi",
+        "DEVA": "Deva Holding · İlaç", "ECZYT": "Eczacıbaşı Yatırım · Holding", "EFOR": "Efor Yatırım · Yatırım",
+        "ENERY": "Enerya Enerji · Doğal gaz", "EUPWR": "Europower Enerji · Enerji ekipmanları",
+        "GENIL": "Gen İlaç · İlaç", "GLYHO": "Global Yatırım Holding · Holding", "GWIND": "Galata Wind · Yenilenebilir enerji",
+        "HEKTS": "Hektaş · Tarım kimyasalları", "ISGYO": "İş GYO · Gayrimenkul", "KCAER": "Kocaer Çelik · Çelik",
+        "KLGYO": "Kiler GYO · Gayrimenkul", "KMPUR": "Kimteks Poliüretan · Kimya", "KORDS": "Kordsa · Kompozit/lastik",
+        "KRVGD": "Kervan Gıda · Gıda", "KUYAS": "Kuyas Yatırım · Yatırım", "LOGO": "Logo Yazılım · Yazılım",
+        "LILAK": "Lila Kağıt · Kağıt", "MAKIM": "Makim Makina · Makine", "MEDTR": "Meditera · Sağlık ekipmanları",
+        "NETAS": "Netaş · Telekom ekipmanları", "NUHCM": "Nuh Çimento · Çimento", "ORGE": "Orge Enerji · Elektrik taahhüt",
+        "PENTA": "Penta Teknoloji · Teknoloji dağıtımı", "QUAGR": "Qua Granite · Seramik", "RALYH": "Ral Yatırım Holding · Holding",
+        "REEDR": "Reeder Teknoloji · Elektronik", "RYGYO": "Reysaş GYO · Gayrimenkul", "SKBNK": "Şekerbank · Bankacılık",
+        "SMRTG": "Smart Güneş Teknolojileri · Güneş enerjisi", "TABGD": "TAB Gıda · Restoran işletmeciliği",
+        "TSKB": "TSKB · Kalkınma ve yatırım bankacılığı", "TMSN": "Tümosan · Motor ve traktör",
+        "YEOTK": "Yeo Teknoloji · Enerji mühendisliği", "YYLGD": "Yayla Agro · Gıda", "KATMR": "Katmerciler · Savunma araçları",
+    }
+    BIST30_WATCH = ["AKBNK", "ASELS", "BIMAS", "DOAS", "EKGYO", "ENKAI", "EREGL", "FROTO", "GARAN", "ISCTR", "KCHOL", "MGROS", "PGSUS", "SAHOL", "SISE", "TCELL", "THYAO", "TOASO", "TUPRS", "YKBNK", "ASTOR", "TAVHL", "TTRAK", "TRMET", "PASEU", "ULKER", "VAKBN", "HALKB", "ENJSA", "TURSG"]
+    BIST100_WATCH = list(BIST_WATCHLIST.keys())[:100]
+    BIST_ALL_WATCH = list(BIST_WATCHLIST.keys())
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def get_yahoo_history(symbol, range_value="3mo", interval_value="1d"):
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.IS"
+        response = requests.get(
+            url,
+            params={"range": range_value, "interval": interval_value, "events": "div,splits"},
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=12
+        )
+        response.raise_for_status()
+        payload = response.json().get("chart", {})
+        if payload.get("error"):
+            raise ValueError(str(payload["error"].get("description", "Yahoo Finance veri hatası")))
+        result = (payload.get("result") or [None])[0]
+        if not result:
+            raise ValueError("Bu sembol için veri bulunamadı.")
+        quotes = result.get("indicators", {}).get("quote", [{}])[0]
+        timestamps = result.get("timestamp", [])
+        frame = pd.DataFrame({
+            "datetime": pd.to_datetime(timestamps, unit="s", utc=True),
+            "open": quotes.get("open", []), "high": quotes.get("high", []),
+            "low": quotes.get("low", []), "close": quotes.get("close", []),
+            "volume": quotes.get("volume", []),
+        })
+        frame = frame.dropna(subset=["datetime", "open", "high", "low", "close"])
+        if frame.empty:
+            raise ValueError("Geçerli fiyat verisi gelmedi.")
+        return frame.sort_values("datetime").drop_duplicates("datetime").set_index("datetime")
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def get_bist_snapshot(symbols_tuple):
+        rows = []
+        def one(sym):
+            try:
+                d = get_yahoo_history(sym, "3mo", "1d")
+                close = d["close"].astype(float)
+                last = float(close.iloc[-1])
+                prev = float(close.iloc[-2]) if len(close) > 1 else last
+                vol = float(d["volume"].iloc[-1]) if pd.notna(d["volume"].iloc[-1]) else np.nan
+                value = last * vol if pd.notna(vol) else np.nan
+                return {"Kod": sym, "Son fiyat": last, "Günlük %": (last / prev - 1) * 100 if prev else np.nan,
+                        "Hacim": vol, "Yaklaşık işlem değeri": value, "Veri zamanı": d.index[-1],
+                        "Veri": "OK"}
+            except Exception as exc:
+                return {"Kod": sym, "Son fiyat": np.nan, "Günlük %": np.nan, "Hacim": np.nan,
+                        "Yaklaşık işlem değeri": np.nan, "Veri zamanı": pd.NaT, "Veri": str(exc)[:100]}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            rows = list(pool.map(one, symbols_tuple))
+        return pd.DataFrame(rows)
+
+    st.subheader("Piyasa evreni ve değerleme taraması")
+    universe_choice = st.selectbox("Hangi hisseleri tarayalım?", ["BIST 30 · izleme sepeti", "BIST 100 · geniş izleme sepeti", "BIST geneli · uygulama tarama evreni"], index=2)
+    if universe_choice.startswith("BIST 30"):
+        universe_symbols = [x for x in BIST30_WATCH if x in BIST_WATCHLIST]
+    elif universe_choice.startswith("BIST 100"):
+        universe_symbols = [x for x in BIST100_WATCH if x in BIST_WATCHLIST]
+    else:
+        universe_symbols = BIST_ALL_WATCH
+    st.caption("Endeks sepetleri bu uygulamadaki izleme listeleridir; resmî ve eksiksiz endeks üyeliği değildir. Borsa İstanbul endeks üyelikleri dönemsel olarak değişir. Resmî bileşen listeleri ayrı kaynaktan güncellenmelidir.")
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def get_yahoo_valuation(symbol):
+        # Yahoo Finance fundamentals endpoint; bazı sembollerde/veri anlarında erişim reddedilebilir.
+        url = f"https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/{symbol}.IS"
+        params = {"type": "quarterlyMarketCap,quarterlyStockholdersEquity,annualStockholdersEquity,quarterlyTotalEquityGrossMinorityInterest,annualTotalEquityGrossMinorityInterest", "period1": int((datetime.now(timezone.utc).timestamp()) - 500*86400), "period2": int(datetime.now(timezone.utc).timestamp()), "merge": "false", "padTimeSeries": "true"}
+        try:
+            r = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
+            if not r.ok:
+                return {"Kod": symbol, "PD/DD": np.nan, "Özkaynak": np.nan, "Piyasa değeri": np.nan, "Değerleme notu": f"Kaynak HTTP {r.status_code}"}
+            payload = r.json().get("timeseries", {}).get("result", [])
+            values = {}
+            for item in payload:
+                key = item.get("meta", {}).get("type", [None])[0]
+                points = item.get("quarterly", item.get("annual", []))
+                if points:
+                    valid_points = [x for x in points if x.get("reportedValue", {}).get("raw") is not None]
+                    if valid_points:
+                        values[key] = float(valid_points[-1]["reportedValue"]["raw"])
+            mcap = next((v for k,v in values.items() if "MarketCap" in str(k)), np.nan)
+            equity = next((v for k,v in values.items() if "Equity" in str(k) and v > 0), np.nan)
+            pb = mcap / equity if pd.notna(mcap) and pd.notna(equity) and equity > 0 else np.nan
+            return {"Kod": symbol, "PD/DD": pb, "Özkaynak": equity, "Piyasa değeri": mcap, "Değerleme notu": "Yaklaşık; kaynak verisi teyit edilmeli" if pd.notna(pb) else "PD/DD verisi alınamadı"}
+        except Exception as exc:
+            return {"Kod": symbol, "PD/DD": np.nan, "Özkaynak": np.nan, "Piyasa değeri": np.nan, "Değerleme notu": "Veri alınamadı"}
+
+    with st.expander("PD/DD nasıl yorumlanmalı?", expanded=False):
+        st.write("PD/DD = piyasa değeri / özkaynak. Düşük oran, şirketin özkaynağına göre düşük fiyatlandığını gösterebilir; fakat düşük kârlılık, zarar, yüksek risk veya özkaynak kalitesi sorunları da sebep olabilir. Bankalar ve sanayi şirketleri aynı eşiklerle kıyaslanmamalıdır.")
+        st.write("Bu tarama yalnızca erişilebilen sağlayıcı verisini gösterir. Eksik oranlar sıfır kabul edilmez; canlı finansal veri erişimi garanti değildir.")
+
+    left, right = st.columns([1, 1])
+    with left:
+        selected_symbol = st.selectbox("Hisse seç", list(BIST_WATCHLIST.keys()), index=0,
+                                       format_func=lambda x: f"{x} — {BIST_WATCHLIST[x]}")
+    with right:
+        chart_interval_label = st.selectbox("Grafik periyodu", ["Günlük", "Saatlik", "Haftalık"], index=0)
+    chart_params = {"Günlük": ("3mo", "1d"), "Saatlik": ("5d", "1h"), "Haftalık": ("2y", "1wk")}
+    try:
+        selected_data = get_yahoo_history(selected_symbol, *chart_params[chart_interval_label])
+        close = selected_data["close"].astype(float)
+        selected_data["EMA20"] = close.ewm(span=20, adjust=False).mean()
+        selected_data["EMA50"] = close.ewm(span=50, adjust=False).mean()
+        delta = close.diff()
+        gain = delta.clip(lower=0).rolling(14).mean()
+        loss = -delta.clip(upper=0).rolling(14).mean()
+        rs = gain / loss.replace(0, np.nan)
+        selected_data["RSI14"] = 100 - (100 / (1 + rs))
+        last = float(close.iloc[-1])
+        previous = float(close.iloc[-2]) if len(close) > 1 else last
+        day_change = (last / previous - 1) * 100 if previous else 0
+        latest_rsi = float(selected_data["RSI14"].iloc[-1]) if pd.notna(selected_data["RSI14"].iloc[-1]) else np.nan
+        ema20 = float(selected_data["EMA20"].iloc[-1])
+        ema50 = float(selected_data["EMA50"].iloc[-1])
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Son fiyat", f"₺{last:,.2f}", f"{day_change:+.2f}%")
+        m2.metric("RSI (14)", f"{latest_rsi:.1f}" if pd.notna(latest_rsi) else "—")
+        m3.metric("EMA 20 / 50", "Pozitif" if ema20 > ema50 else "Negatif", f"EMA20 ₺{ema20:,.2f}")
+        m4.metric("Son veri mumu", selected_data.index[-1].tz_convert("Europe/Istanbul").strftime("%d.%m.%Y %H:%M"))
+
+        fig = go.Figure()
+        fig.add_trace(go.Candlestick(x=selected_data.index, open=selected_data["open"], high=selected_data["high"],
+                                     low=selected_data["low"], close=selected_data["close"], name=selected_symbol))
+        fig.add_trace(go.Scatter(x=selected_data.index, y=selected_data["EMA20"], name="EMA 20", line=dict(width=1.5)))
+        fig.add_trace(go.Scatter(x=selected_data.index, y=selected_data["EMA50"], name="EMA 50", line=dict(width=1.5)))
+        fig.update_layout(template="plotly_dark", height=520, margin=dict(l=10, r=10, t=25, b=10),
+                          xaxis_rangeslider_visible=False, legend=dict(orientation="h", y=1.02),
+                          paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Teknik görünüm: kurallı, açıklanabilir puanlama; getiri garantisi değildir.
+        score = 0
+        reasons = []
+        if ema20 > ema50:
+            score += 1; reasons.append("EMA 20, EMA 50'nin üzerinde: kısa/orta vadeli eğilim olumlu.")
+        else:
+            reasons.append("EMA 20, EMA 50'nin altında: eğilim zayıf veya baskı altında.")
+        if pd.notna(latest_rsi) and 50 <= latest_rsi < 70:
+            score += 1; reasons.append("RSI 50–70 aralığında: momentum pozitif, aşırı alım eşiğinin altında.")
+        elif pd.notna(latest_rsi) and latest_rsi >= 70:
+            reasons.append("RSI 70 ve üzeri: momentum güçlü olabilir, fakat aşırı alım/geri çekilme riski artar.")
+        elif pd.notna(latest_rsi) and latest_rsi < 30:
+            reasons.append("RSI 30 altında: aşırı satım bölgesi; tek başına dönüş sinyali değildir.")
+        else:
+            reasons.append("RSI 30–50 aralığında: momentum teyidi sınırlı.")
+        if len(close) >= 21 and close.iloc[-1] > close.iloc[-21]:
+            score += 1; reasons.append("Son 20 işlem günü kapanışı önceki seviyenin üzerinde.")
+        else:
+            reasons.append("Son 20 işlem gününde pozitif fiyat ivmesi teyit edilmedi.")
+        if score >= 2:
+            view = "Olumlu teknik görünüm"
+        elif score == 1:
+            view = "Karışık / izlemeye değer"
+        else:
+            view = "Zayıf teknik görünüm"
+        st.subheader(f"{selected_symbol} · Teknik değerlendirme")
+        st.markdown(f"**Özet:** {view} · {score}/3 teknik koşul olumlu")
+        for reason in reasons:
+            st.write(f"• {reason}")
+        st.caption("Bu puan olasılık veya hedef fiyat değildir. Yalnızca grafikten hesaplanan üç basit teknik koşulu özetler.")
+        st.markdown("#### Vade bazlı değerlendirme")
+        st.write("**Kısa vade (birkaç gün–4 hafta):** RSI, son fiyat ivmesi ve EMA20/50 daha belirleyicidir; oynaklık ve zarar-kes seviyesi ayrıca değerlendirilmelidir.")
+        st.write("**Orta vade (1–6 ay):** fiyat trendi yanında çeyreklik satış/kâr gelişimi, borçluluk, nakit akışı ve sektör koşulları gerekir.")
+        st.write("**Uzun vade (6–24 ay):** rekabet avantajı, sürdürülebilir kârlılık, yatırım harcamaları, bilanço kalitesi ve değerleme birlikte incelenmelidir.")
+        st.info("Uygulama bu vadeler için kesin al/sat emri veya garanti getiri üretmez. Bu sürümde kısa vadeli teknik göstergeler hesaplanır; orta/uzun vade finansal değerlendirmesi için güncel KAP verileri ayrıca bağlanmalıdır.")
+
+        with st.expander("Şirket ne iş yapıyor, neden izlenebilir?"):
+            st.write(BIST_WATCHLIST[selected_symbol] + ".")
+            st.write("Şirketin ayrışmasını değerlendirirken son finansal raporlar, satış/kâr büyümesi, borçluluk, nakit akışı, sektör görünümü, değerleme ve KAP açıklamaları birlikte incelenmelidir.")
+            st.write("Bu sürüm şirket faaliyet alanını genel sınıflandırma olarak verir; güncel finansal veriler ve KAP haberleri henüz otomatik bağlanmış değildir.")
+    except Exception as exc:
+        st.error(f"{selected_symbol} verisi şu anda alınamadı: {exc}")
+        st.info("Fiyat kaynağı Yahoo Finance üzerinden deneniyor. Sembol erişimi veya sağlayıcı kısıtlaması olabilir; biraz sonra tekrar deneyebilirsin.")
+
+    st.divider()
+    st.subheader("BIST izleme sepeti · Günün öne çıkanları")
+    st.caption("Bu tablo aşağıdaki izleme sepetindeki hisseleri karşılaştırır; Borsa İstanbul'un resmî tam piyasa sıralaması değildir. Günlük değişim ve hacim sağlayıcının son barına dayanır.")
+    with st.spinner("İzleme sepeti verileri alınıyor…"):
+        snapshot = get_bist_snapshot(tuple(universe_symbols))
+    valid = snapshot.dropna(subset=["Günlük %", "Son fiyat"]).copy()
+    st.markdown("#### 📚 PD/DD taraması · En düşük / en yüksek")
+    with st.spinner("Erişilebilir hisselerin PD/DD verileri sorgulanıyor…"):
+        valuation_rows = []
+        # Sorgu sayısını makul tut: seçili evrenden ilk 45 sembol. İstenen sembol grafikte ayrıca seçilebilir.
+        valuation_symbols = universe_symbols[:45]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            valuation_rows = list(pool.map(get_yahoo_valuation, valuation_symbols))
+        valuation = pd.DataFrame(valuation_rows)
+    if not valuation.empty and valuation["PD/DD"].notna().any():
+        valued = valuation.dropna(subset=["PD/DD"]).copy()
+        valued = valued[valued["PD/DD"] > 0]
+        low_col, high_col = st.columns(2)
+        with low_col:
+            st.markdown("##### En düşük PD/DD")
+            low = valued.nsmallest(10, "PD/DD").copy()
+            low["Şirket"] = low["Kod"].map(BIST_WATCHLIST)
+            st.dataframe(low[["Kod", "Şirket", "PD/DD", "Değerleme notu"]].style.format({"PD/DD":"{:.2f}x"}), hide_index=True, use_container_width=True)
+        with high_col:
+            st.markdown("##### En yüksek PD/DD")
+            high = valued.nlargest(10, "PD/DD").copy()
+            high["Şirket"] = high["Kod"].map(BIST_WATCHLIST)
+            st.dataframe(high[["Kod", "Şirket", "PD/DD", "Değerleme notu"]].style.format({"PD/DD":"{:.2f}x"}), hide_index=True, use_container_width=True)
+        st.caption("PD/DD oranları yalnızca kaynağın döndürdüğü değerlerden hesaplanır; veri eksikse hisse sıralamaya girmez. Finansal tabloların raporlama tarihi ve veri kaynağı teyit edilmelidir.")
+    else:
+        st.warning("Bu oturumda seçili evren için güvenilir PD/DD verisi alınamadı. Fiyat verisi mevcut olsa bile temel finansal oranlar ayrı veri kaynağı gerektirebilir; oranlar tahmin edilerek doldurulmadı.")
+    if not valid.empty:
+        gainers, losers, volume_col = st.columns(3)
+        with gainers:
+            st.markdown("#### 🟢 En çok yükselen")
+            st.dataframe(valid.nlargest(5, "Günlük %")[ ["Kod", "Son fiyat", "Günlük %"] ].style.format({"Son fiyat":"₺{:,.2f}", "Günlük %":"{:+.2f}%"}), hide_index=True, use_container_width=True)
+        with losers:
+            st.markdown("#### 🔴 En çok düşen")
+            st.dataframe(valid.nsmallest(5, "Günlük %")[ ["Kod", "Son fiyat", "Günlük %"] ].style.format({"Son fiyat":"₺{:,.2f}", "Günlük %":"{:+.2f}%"}), hide_index=True, use_container_width=True)
+        with volume_col:
+            st.markdown("#### 📊 İşlem değeri yüksek")
+            st.dataframe(valid.nlargest(5, "Yaklaşık işlem değeri")[ ["Kod", "Son fiyat", "Yaklaşık işlem değeri"] ].style.format({"Son fiyat":"₺{:,.2f}", "Yaklaşık işlem değeri":"₺{:,.0f}"}), hide_index=True, use_container_width=True)
+        st.markdown("#### Tüm izleme sepeti")
+        show = valid.copy()
+        show["Şirket"] = show["Kod"].map(BIST_WATCHLIST)
+        show = show[["Kod", "Şirket", "Son fiyat", "Günlük %", "Hacim", "Yaklaşık işlem değeri", "Veri zamanı"]].sort_values("Günlük %", ascending=False)
+        st.dataframe(show.style.format({"Son fiyat":"₺{:,.2f}", "Günlük %":"{:+.2f}%", "Hacim":"{:,.0f}", "Yaklaşık işlem değeri":"₺{:,.0f}"}, na_rep="—"), hide_index=True, use_container_width=True)
+    else:
+        st.warning("İzleme sepeti için geçerli veri alınamadı. Veri sağlayıcı erişimini kontrol et.")
+
+    st.subheader("Kurum bazlı net alım / satım")
+    st.info("Bu sürümde kurumların günlük net alım-satım sıralaması henüz gösterilmiyor. Bu veri, fiyat ve hacimden güvenilir biçimde çıkarılamaz; aracı kurum dağılımı veya lisanslı gerçek zamanlı veri kaynağı ayrıca entegre edilmeli. Burada uydurma kurum isimleri ya da akış rakamları gösterilmeyecek.")
+    st.caption("Veri notu: Bu ekran üçüncü taraf Yahoo Finance fiyat akışını kullanır; gerçek zamanlılık veya gecikmesiz fiyat garantisi vermez. Veriler 5 dakika önbelleğe alınır. Kurumsal kullanım ve kesin seans verileri için lisanslı kaynak tercih edilmelidir.")
+    st.stop()
 
 st.markdown("""
 <style>
