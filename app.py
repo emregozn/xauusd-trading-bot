@@ -49,6 +49,12 @@ st.markdown("""
   .hero-sub { color: #9fb0c9; font-size: 14px; margin-top: 8px; }
   .pill { display: inline-block; border: 1px solid #344a68; background: #15243a; color: #c7d8ef; border-radius: 999px; padding: 5px 10px; margin-right: 6px; font-size: 12px; }
   .section-note { color: #93a6c1; font-size: 13px; }
+  .signal-legend { background: rgba(16,26,43,.88); border: 1px solid #30425d; border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; }
+  .legend-row { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0; }
+  .legend-swatch { width: 11px; height: 11px; min-width: 11px; border-radius: 3px; margin-top: 5px; box-shadow: 0 0 12px rgba(255,255,255,.08); }
+  .legend-title { color: #f1f5fb; font-weight: 750; font-size: 14px; }
+  .legend-detail { color: #aebed4; font-size: 12px; line-height: 1.45; margin-top: 3px; }
+  .signal-score-pill { display: inline-block; border: 1px solid #344a68; background: #15243a; color: #dce8f8; padding: 4px 9px; border-radius: 999px; font-size: 12px; }
   hr { border-color: #26364d !important; }
 </style>
 <div class="hero">
@@ -175,6 +181,15 @@ def get_live_data(api_key, interval):
     data = data.sort_values("datetime")
     data = data.drop_duplicates("datetime")
     data = data.set_index("datetime")
+
+    # Some feeds may label candles with suspicious future timestamps.
+    # Remove only clearly future bars when at least 55 valid historical bars remain.
+    now_utc = pd.Timestamp.now(tz="UTC")
+    future_mask = data.index > (now_utc + pd.Timedelta(minutes=5))
+    if future_mask.any():
+        historical = data.loc[~future_mask]
+        if len(historical) >= 55:
+            data = historical
 
     if len(data) < 55:
         raise ValueError(
@@ -400,14 +415,15 @@ max_age = {
 if mode == "Twelve Data API":
     st.caption(
         f"API mum zamanı: {last_time.strftime('%Y-%m-%d %H:%M:%S %Z')} | "
+        f"Türkiye saati: {last_time.tz_convert('Europe/Istanbul').strftime('%Y-%m-%d %H:%M:%S %Z')} | "
         f"Şu an UTC: {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')} | "
         f"Fark: {age_hours:.2f} saat"
     )
 
     if age_hours < -0.1:
-        st.error(
-            "API mum zamanı gelecekte görünüyor. "
-            "Saat bilgisi doğrulanmadan sinyali kullanma."
+        st.warning(
+            "API son mum zamanını gelecekte gösteriyor. Gelecek tarihli mumlar yeterli geçmiş veri bulunduğunda analizden çıkarılır; "
+            "kaynak zaman damgası yine de doğrulanmalıdır. Bu durumda sinyali temkinli değerlendir."
         )
     elif age_hours > max_age:
         st.error(
@@ -631,7 +647,9 @@ support = float(recent["low"].min())
 # DASHBOARD ÖZETİ
 # --------------------------------------------------
 st.markdown("### Piyasa özeti")
-st.caption(f"Kaynak: {mode}  ·  Zaman dilimi: {interval}  ·  Son mum: {last_time.strftime('%Y-%m-%d %H:%M UTC')}")
+local_tz = "Europe/Istanbul"
+last_time_local = last_time.tz_convert(local_tz) if getattr(last_time, "tzinfo", None) is not None else last_time.tz_localize("UTC").tz_convert(local_tz)
+st.caption(f"Kaynak: {mode}  ·  Mum aralığı: {interval}  ·  Son mum: {last_time_local.strftime('%Y-%m-%d %H:%M %Z')} (Türkiye saati)")
 
 # --------------------------------------------------
 # ÖZET KUTULARI
@@ -670,23 +688,73 @@ elif signal == "SAT eğilimi":
 else:
     card_class, signal_color = "neutral", "#f3d27c"
 
-signal_cols = st.columns([1.05, 1.5], gap="large")
+# Pie/donut breakdown counts the three rules, not a claimed probability of success.
+criterion_directions = [
+    "AL" if trend_up else ("SAT" if trend_down else "NÖTR"),
+    "AL" if price_above_fast else ("SAT" if price_below_fast else "NÖTR"),
+    "AL" if (rsi_rising and 40 <= rsi <= 70) else ("SAT" if (rsi_falling and 30 <= rsi <= 60) else "NÖTR"),
+]
+buy_count = criterion_directions.count("AL")
+sell_count = criterion_directions.count("SAT")
+neutral_count = criterion_directions.count("NÖTR")
+labels = [label for label, count in [("AL", buy_count), ("SAT", sell_count), ("NÖTR", neutral_count)] if count > 0]
+values = [count for count in [buy_count, sell_count, neutral_count] if count > 0]
+colors = {"AL": "#35d39a", "SAT": "#ff647c", "NÖTR": "#f3c969"}
+chart_colors = [colors[label] for label in labels]
+
+donut = go.Figure(data=[go.Pie(
+    labels=labels,
+    values=values,
+    hole=0.68,
+    sort=False,
+    direction="clockwise",
+    marker=dict(colors=chart_colors, line=dict(color="#101a2b", width=4)),
+    texttemplate="%{label}<br>%{percent}",
+    textposition="inside",
+    insidetextorientation="horizontal",
+    textfont=dict(size=13, color="#07111e"),
+    hovertemplate="%{label}: %{value}/3 kriter (%{percent})<extra></extra>",
+    showlegend=False
+)])
+donut.update_layout(
+    height=310,
+    margin=dict(l=4, r=4, t=10, b=10),
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(color="#d9e4f3"),
+    annotations=[dict(text=f"{score:+d}<br><span style='font-size:10px'>YÖN PUANI</span>", x=0.5, y=0.5, showarrow=False, font=dict(size=24, color="#f5f8ff"))]
+)
+
+signal_cols = st.columns([1.0, 1.1, 1.25], gap="medium")
 with signal_cols[0]:
     st.markdown(
         f'<div class="signal-card {card_class}">'
         f'<div class="signal-eyebrow">Mevcut teknik görünüm</div>'
         f'<div class="signal-head" style="color:{signal_color}">{signal}</div>'
-        f'<div class="signal-body">Yön puanı: <b>{score:+d} / 3</b> (EMA trendi, fiyat konumu ve RSI momentumu)<br>Son kapanış: <b>${price:,.2f}</b><br>RSI: <b>{rsi:.1f} / 100</b></div>'
+        f'<div class="signal-body">Yön puanı: <b>{score:+d} / 3</b><br>Son kapanış: <b>${price:,.2f}</b><br>RSI: <b>{rsi:.1f} / 100</b></div>'
+        f'<div style="margin-top:12px"><span class="signal-score-pill">3 kural · şeffaf skor</span></div>'
         f'</div>',
         unsafe_allow_html=True
     )
 with signal_cols[1]:
-    st.markdown('<div class="mini-label">Teknik kriterlerin yön uyumu</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="mini-label" style="color:#56e0ad">AL yönü desteği · {buy_pct}% ({buy_support}/3 kriter)</div>', unsafe_allow_html=True)
-    st.progress(buy_pct / 100)
-    st.markdown(f'<div class="mini-label" style="color:#ff8193">SAT yönü desteği · {sell_pct}% ({sell_support}/3 kriter)</div>', unsafe_allow_html=True)
-    st.progress(sell_pct / 100)
-    st.markdown('<div class="small-note">Bu göstergeler istatistiksel başarı ihtimali değildir; yalnızca mevcut kurallarla uyumu özetler.</div>', unsafe_allow_html=True)
+    st.markdown("**Teknik yön dağılımı**")
+    st.plotly_chart(donut, use_container_width=True, config={"displayModeBar": False})
+with signal_cols[2]:
+    st.markdown("**Sinyalin arkasındaki nedenler**")
+    legend_items = [
+        ("AL", buy_count, "#35d39a", " · ".join(buy_reasons) if buy_reasons else "AL yönünü destekleyen kriter yok."),
+        ("SAT", sell_count, "#ff647c", " · ".join(sell_reasons) if sell_reasons else "SAT yönünü destekleyen kriter yok."),
+        ("NÖTR", neutral_count, "#f3c969", " · ".join(neutral_reasons) if neutral_reasons else "Nötr kriter yok."),
+    ]
+    for label, count, color, detail in legend_items:
+        pct = count / 3 * 100
+        st.markdown(
+            f'<div class="signal-legend"><div class="legend-row"><span class="legend-swatch" style="background:{color}"></span>'
+            f'<div><div class="legend-title">{label} · {pct:.0f}% <span style="color:#9fb0c9;font-weight:500">({count}/3 kriter)</span></div>'
+            f'<div class="legend-detail">{detail}</div></div></div></div>',
+            unsafe_allow_html=True
+        )
+    st.markdown('<div class="small-note">Yüzdeler yalnızca 3 teknik kuralın dağılımıdır; kâr etme olasılığı veya başarı oranı değildir.</div>', unsafe_allow_html=True)
 
 reason_cols = st.columns(2, gap="large")
 with reason_cols[0]:
@@ -726,7 +794,7 @@ else:
 st.caption(
     f"Veri kaynağı: {mode} • "
     f"Mum aralığı: {interval} • "
-    f"Son mum: {last_time.strftime('%Y-%m-%d %H:%M UTC')}"
+    f"Son mum: {last_time_local.strftime('%Y-%m-%d %H:%M %Z')} (Türkiye saati)"
 )
 
 # --------------------------------------------------
