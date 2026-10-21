@@ -97,9 +97,30 @@ if market_page == "🇹🇷 BIST · Hisseler":
         "SMRTG": "Smart Güneş Teknolojileri · Güneş enerjisi", "TABGD": "TAB Gıda · Restoran işletmeciliği",
         "TSKB": "TSKB · Kalkınma ve yatırım bankacılığı", "TMSN": "Tümosan · Motor ve traktör",
         "YEOTK": "Yeo Teknoloji · Enerji mühendisliği", "YYLGD": "Yayla Agro · Gıda", "KATMR": "Katmerciler · Savunma araçları",
+        # Daha geniş BIST tarama evreni: endeks dışı ve görece yeni/orta ölçekli şirketler
+        "GLRYH": "Güler Yatırım Holding · Finansal yatırımlar", "KPEKS": "Kapeks Kimya · Kimya/üretim yatırımı",
+        "CGCAM": "Çağdaş Cam · Cam ve sanayi", "SAYAS": "Say Yenilenebilir Enerji · Rüzgâr enerjisi ekipmanları",
+        "SARKY": "Sarkuysan · Bakır ve iletken", "RAYSG": "Ray Sigorta · Sigorta", "KBORU": "Kuzey Boru · Altyapı boruları",
+        "ZERGY": "Zeray GYO · Gayrimenkul", "KGYO": "Koru Gayrimenkul Yatırım Ortaklığı · Gayrimenkul",
+        "SERNT": "Seranit · Seramik ve yapı malzemeleri", "DOFRB": "Dof Robotik · Eğlence/robotik teknolojileri",
+        "HTTBT": "Hitit Bilgisayar · Havacılık yazılımı", "BEYAZ": "Beyaz Filo · Otomotiv perakendesi",
+        "EKIM": "Ekim Turizm · Turizm", "AYES": "Ayes Çelik Hasır · Çelik yapı ürünleri",
+        "ZRGYO": "Ziraat GYO · Gayrimenkul", "GEREL": "Gersan Elektrik · Elektrik ekipmanları",
+        "CLEBI": "Çelebi Hava Servisi · Yer hizmetleri", "DCTTR": "DCT Trading · Emtia ticareti",
+        "BMSCH": "BMS Birleşik Metal · Metal ürünleri", "USHOL": "US Yatırım Holding · Yatırımlar",
+        "GLCVY": "Gelecek Varlık Yönetimi · Varlık yönetimi", "BRKVY": "Birikim Varlık Yönetimi · Varlık yönetimi",
+        "INTET": "İntetra Teknoloji · Teknoloji ve tarım yatırımları", "DAPGM": "DAP Gayrimenkul · Gayrimenkul geliştirme",
+        "ODINE": "Odine Solutions · Telekom yazılımı", "DSTKF": "Destek Finans Faktoring · Finans", "KTLEV": "Katılımevim · Tasarruf finansmanı",
+        "ESEN": "Esenboğa Elektrik · Yenilenebilir enerji", "IEYHO": "Işıklar Enerji ve Yapı Holding · Holding/enerji",
+        "IZENR": "İzdemir Enerji · Elektrik üretimi", "TUCLK": "Tuğçelik Alüminyum · Metal sanayi",
+        "MIATK": "Mia Teknoloji · Teknoloji ve dijital çözümler", "KLSER": "Kaleseramik · Seramik", "KLSYN": "Koleksiyon Mobilya · Mobilya",
+        "KOTON": "Koton · Hazır giyim", "EFORC": "Efor Çay · Gıda ve içecek", "BIGEN": "Birleşim Grup Enerji · Enerji",
+        "MOPAS": "Mopaş Marketçilik · Perakende", "ONCSM": "Oncosem · Sağlık teknolojileri", "VBTYZ": "VBT Yazılım · Yazılım",
+        "HKTM": "Hidropar Hareket Kontrol · Endüstriyel otomasyon", "IMASM": "İmaş Makina · Makine imalatı",
+        "KLYPV": "Kalyon Güneş Teknolojileri · Güneş enerjisi", "ZERGY": "Zeray GYO · Gayrimenkul",
     }
     BIST30_WATCH = ["AKBNK", "ASELS", "BIMAS", "DOAS", "EKGYO", "ENKAI", "EREGL", "FROTO", "GARAN", "ISCTR", "KCHOL", "MGROS", "PGSUS", "SAHOL", "SISE", "TCELL", "THYAO", "TOASO", "TUPRS", "YKBNK", "ASTOR", "TAVHL", "TTRAK", "TRMET", "PASEU", "ULKER", "VAKBN", "HALKB", "ENJSA", "TURSG"]
-    BIST100_WATCH = list(BIST_WATCHLIST.keys())[:100]
+    BIST100_WATCH = list(dict.fromkeys(list(BIST_WATCHLIST.keys())[:100] + ["GLRYH", "KPEKS", "CGCAM", "SAYAS", "SARKY", "RAYSG", "KBORU", "ZERGY", "KGYO", "SERNT", "DOFRB", "HTTBT", "BEYAZ", "EKIM", "AYES", "ZRGYO", "GEREL", "CLEBI", "DCTTR", "BMSCH", "GLCVY", "BRKVY", "INTET", "DAPGM", "ODINE", "DSTKF", "KTLEV", "ESEN", "IEYHO", "IZENR", "TUCLK", "KOTON", "EFORC", "MOPAS", "ONCSM", "VBTYZ", "HKTM", "IMASM", "KLYPV"]))
     BIST_ALL_WATCH = list(BIST_WATCHLIST.keys())
 
     @st.cache_data(ttl=300, show_spinner=False)
@@ -192,7 +213,10 @@ if market_page == "🇹🇷 BIST · Hisseler":
 
     left, right = st.columns([1, 1])
     with left:
-        selected_symbol = st.selectbox("Hisse seç", list(BIST_WATCHLIST.keys()), index=0,
+        symbol_options = list(BIST_WATCHLIST.keys())
+    default_symbol = st.session_state.get("opportunity_selected_symbol", symbol_options[0])
+    default_index = symbol_options.index(default_symbol) if default_symbol in symbol_options else 0
+    selected_symbol = st.selectbox("Hisse seç", symbol_options, index=default_index,
                                        format_func=lambda x: f"{x} — {BIST_WATCHLIST[x]}")
     with right:
         chart_interval_label = st.selectbox("Grafik periyodu", ["Günlük", "Saatlik", "Haftalık"], index=0)
@@ -322,6 +346,50 @@ if market_page == "🇹🇷 BIST · Hisseler":
         st.dataframe(show.style.format({"Son fiyat":"₺{:,.2f}", "Günlük %":"{:+.2f}%", "Hacim":"{:,.0f}", "Yaklaşık işlem değeri":"₺{:,.0f}"}, na_rep="—"), hide_index=True, use_container_width=True)
     else:
         st.warning("İzleme sepeti için geçerli veri alınamadı. Veri sağlayıcı erişimini kontrol et.")
+
+    st.divider()
+    st.subheader("✨ Fırsatlar köşesi · Teknik görünüm + şirket katalizörleri")
+    st.caption("Bu bölüm kesin alım önerisi değil, araştırmaya değer adayları ve bunların gerekçelerini bir araya getirir. Haber/katalizör notları belirtilen tarihteki kamuya açık açıklamalara dayanır; işlem öncesinde KAP'tan teyit edilmelidir.")
+
+    # Güncel olay örnekleri: kaynak ve tarihleri kullanıcıya açıkça belirtilir; dinamik fiyat skoru ile karıştırılmaz.
+    catalyst_cards = [
+        {"kod":"YEOTK", "baslik":"Enerji depolama projesi finansmanı", "tarih":"20.10.2026", "detay":"Azerbaycan'da 250 MWh batarya enerji depolama projesi için 58,6 milyon ABD doları tutarındaki EPC-F sözleşmesinde proje finansmanı aşamasının ilerlediği bildirildi.", "neden":"Büyük ölçekli proje ve finansman ilerlemesi siparişin uygulamaya dönüşme görünürlüğünü artırabilir.", "risk":"Proje takvimi, finansman koşulları, marjlar ve tahsilat riski izlenmeli."},
+        {"kod":"KPEKS", "baslik":"Özbekistan üretim yatırımı", "tarih":"20.10.2026", "detay":"Özbekistan'daki ilk etap üretim tesisi için inşaat izni alındığı ve yerel yükleniciyle sözleşme yapıldığı bildirildi.", "neden":"Yeni tesis, üretim kapasitesi ve coğrafi çeşitlenme potansiyeli yaratabilir.", "risk":"Yatırım bütçesi, devreye alma tarihi, işletme sermayesi ve beklenen kârlılık henüz ayrıca incelenmeli."},
+        {"kod":"ATATP", "baslik":"Yazılım iştirakine ek yatırım", "tarih":"20.10.2026", "detay":"Bağlı ortaklığı ATP Capital'in Menulux'e 13,14 milyon TL ek yatırım yapacağı ve gerekli işlemler tamamlanırsa payının %15'e çıkacağı açıklandı.", "neden":"Yazılım/teknoloji iştiraki üzerinden büyüme ve ürün portföyünü genişletme ihtimali bulunuyor.", "risk":"Yatırımın gelir ve kâra katkısı, ortaklık şartları ve iştirak performansı takip edilmeli."},
+        {"kod":"TMSN", "baslik":"Araç ve iş makinesi ihalesi", "tarih":"16.10.2026", "detay":"Tümosan'ın yedi ihale kaleminde toplam yaklaşık 881,6 milyon TL tutarlı işi kazandığı bildirildi.", "neden":"Yeni siparişler ciro görünürlüğünü destekleyebilir.", "risk":"Teslimat takvimi, maliyetler, kâr marjı ve sözleşme şartları ciro tutarından daha önemlidir."},
+        {"kod":"CGCAM", "baslik":"ABD pazarı için yatırım hazırlığı", "tarih":"21.10.2026", "detay":"Çağdaş Cam'ın ABD'de yatırım için çalışmalara başlama kararı aldığı; model, tutar ve yerin henüz belirlenmediği bildirildi.", "neden":"Gerçekleşirse pazara yakın üretim ve gelir çeşitliliği sağlayabilir.", "risk":"Henüz erken aşama niyet/çalışma; kesin yatırım kararı, bütçe ve getiri netleşmiş değil."},
+    ]
+    # Yalnızca mevcut veri sağlayıcısının fiyatlarıyla hesaplanan teknik adaylar; haber katalizörü puanından ayrı tutulur.
+    if not valid.empty:
+        opp = valid.dropna(subset=["Günlük %"]).copy()
+        opp = opp[opp["Kod"].isin(BIST_WATCHLIST)]
+        opp["Şirket"] = opp["Kod"].map(BIST_WATCHLIST)
+        opp["Teknik aday notu"] = np.select(
+            [ (opp["Günlük %"] >= 2), (opp["Günlük %"] > 0), (opp["Günlük %"] <= -2) ],
+            ["Güçlü günlük hareket — devam teyidi gerekir", "Pozitif günlük hareket — trend teyidi gerekir", "Sert düşüş — risk ve haber kontrolü gerekir"],
+            default="Nötr günlük hareket"
+        )
+        st.markdown("#### Fiyat hareketiyle öne çıkan adaylar")
+        st.dataframe(opp.reindex(opp["Günlük %"].abs().sort_values(ascending=False).index).head(10)[["Kod","Şirket","Son fiyat","Günlük %","Yaklaşık işlem değeri","Teknik aday notu"]].style.format({"Son fiyat":"₺{:,.2f}","Günlük %":"{:+.2f}%","Yaklaşık işlem değeri":"₺{:,.0f}"}, na_rep="—"), hide_index=True, use_container_width=True)
+        st.caption("Bu sıralama yalnızca son günlük fiyat değişiminin büyüklüğünü gösterir; olumlu/olumsuz haber, temel değerleme veya beklenen getiri anlamına gelmez.")
+
+    st.markdown("#### Şirket hamleleri nedeniyle izlemeye değer adaylar")
+    for start in range(0, len(catalyst_cards), 2):
+        cols = st.columns(2)
+        for col, item in zip(cols, catalyst_cards[start:start+2]):
+            with col:
+                with st.container(border=True):
+                    st.markdown(f"### {item['kod']} · {BIST_WATCHLIST.get(item['kod'], item['kod'])}")
+                    st.markdown(f"**{item['baslik']}** · {item['tarih']}")
+                    st.write(item["detay"])
+                    st.write("**Neden öne çıkabilir?** " + item["neden"])
+                    st.write("**Kontrol edilmesi gereken risk:** " + item["risk"])
+                    if item["kod"] in BIST_WATCHLIST:
+                        if st.button(f"{item['kod']} grafiğini seç", key=f"opp_{item['kod']}"):
+                            st.session_state["opportunity_selected_symbol"] = item["kod"]
+                            st.session_state["market_page_selector"] = "🇹🇷 BIST · Hisseler"
+                            st.rerun()
+    st.caption("Kamuya açık katalizör örnekleri kaynak araştırmasında görülen 16–20 Ekim 2026 bildirim özetlerinden derlenmiştir. Bunlar otomatik ve eksiksiz KAP haber akışı değildir; yeni bildirimlerle güncellenmesi gerekir.")
 
     st.subheader("Kurum bazlı net alım / satım")
     st.info("Bu sürümde kurumların günlük net alım-satım sıralaması henüz gösterilmiyor. Bu veri, fiyat ve hacimden güvenilir biçimde çıkarılamaz; aracı kurum dağılımı veya lisanslı gerçek zamanlı veri kaynağı ayrıca entegre edilmeli. Burada uydurma kurum isimleri ya da akış rakamları gösterilmeyecek.")
